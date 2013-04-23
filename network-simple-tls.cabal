@@ -1,0 +1,28 @@
+name:                network-simple-tls
+version:             0.1.0.0
+synopsis:            Simple network sockets usage patterns using TLS security.
+description:         Simple network sockets usage patterns using TLS security.
+homepage:            https://github.com/k0001/network-simple-tls
+bug-reports:         https://github.com/k0001/network-simple-tls/issues
+license:             BSD3
+license-file:        LICENSE
+author:              Renzo Carbonara
+maintainer:          renzocarbonaraλgmail.com
+copyright:           Copyright (c) Renzo Carbonara 2013
+category:            Network
+build-type:          Simple
+cabal-version:       >=1.8
+extra-source-files:  README.md PEOPLE
+
+source-repository head
+    type: git
+    location: git://github.com/k0001/network-simple-tls.git
+
+library
+  hs-source-dirs:    src
+  exposed-modules:   Network.Simple.TCP.TLS
+  build-depends:     base           (>=4.5 && < 5)
+                   , network        (>=2.3 && <2.5)
+                   , network-simple (>=0.1 && <0.2)
+                   , tls            (>=1.1 && <1.2)
+                   , tls-extra      (>=0.6 && <0.7)

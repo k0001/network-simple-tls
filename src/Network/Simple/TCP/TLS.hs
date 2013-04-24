@@ -1,6 +1,8 @@
-module Network.Simple.TCP.TLS
-  ( connect
+module Network.Simple.TCP.TLS (
+  -- * Client side
+    connect
   , connect'
+  -- * Low level support
   , connectTls
   ) where
 

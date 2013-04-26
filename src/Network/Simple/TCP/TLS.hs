@@ -1,3 +1,10 @@
+-- | This mdule exports functions that abstract simple usage patterns
+-- for establishing TLS-secured TCP connections, relevant to both the
+-- client side and server side of the connection.
+--
+-- Consider using the @network-simple@ package if you would like to use
+-- a similar API without TLS support.
+
 module Network.Simple.TCP.TLS (
   -- * Client side
     connect

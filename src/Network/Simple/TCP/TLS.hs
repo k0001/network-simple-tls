@@ -49,9 +49,9 @@ connect'
                       -- and the server address.
   -> IO r
 connect' params host port f = E.bracket acq rel use where
-  acq = connectTls params host port
-  rel = T.backendClose . T.ctxConnection . fst
-  use x@(ctx,_) = T.handshake ctx >> E.finally (f x) (T.bye ctx)
+    acq = connectTls params host port
+    rel = T.backendClose . T.ctxConnection . fst
+    use x@(ctx,_) = T.handshake ctx >> E.finally (f x) (T.bye ctx)
 
 
 -- | Similar to 'S.connectSock', except it returns a secure TLS 'T.Context'
@@ -79,7 +79,7 @@ defCheckCerts certStore host = TE.certificateChecks
     , return . TE.certificateVerifyDomain host
     ]
 
--- | Build some default 'T.Params' for the client side of a TLS connection.
+-- | Make default 'T.Params' for the client side of a TLS connection.
 defModClientParams :: [(X509, Maybe T.PrivateKey)] -> ([X509]
                    -> IO T.CertificateUsage) -> NS.HostName -> T.Params
                    -> T.Params

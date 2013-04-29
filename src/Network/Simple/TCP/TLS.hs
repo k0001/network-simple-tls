@@ -13,17 +13,18 @@ module Network.Simple.TCP.TLS (
   , S.listen
   -- ** Accepting
   , accept
-  , accept'
+  , acceptParams
   , acceptFork
-  , acceptFork'
+  , acceptForkParams
 
   -- * Client side
   , connect
-  , connect'
+  , connectParams
 
   -- * Low level support
   , S.bindSock
   , connectTls
+  , acceptTls
   ) where
 
 import           Control.Concurrent         (ThreadId, forkIO)
@@ -31,13 +32,15 @@ import qualified Control.Exception          as E
 import           Control.Monad              (forever)
 import           Data.Certificate.X509      (X509)
 import           Data.CertificateStore      (CertificateStore)
-import           System.IO                  (IOMode(ReadWriteMode), hClose)
+import           System.IO                  (IOMode(ReadWriteMode))
 import qualified Network.Simple.TCP         as S
 import qualified Network.Socket             as NS
 import qualified Network.TLS                as T
 import           Network.TLS.Extra          as TE
 import           Crypto.Random.API          (getSystemRandomGen)
 import           System.Certificate.X509    (getSystemCertificateStore)
+
+--------------------------------------------------------------------------------
 
 -- | Start a TCP server that sequentially accepts and uses each incoming
 -- connection.
@@ -81,6 +84,7 @@ serveFork cpk hp port k = do
     S.listen hp port $ \(lsock,_) -> do
       forever $ acceptFork cpk lsock k
 
+--------------------------------------------------------------------------------
 
 -- | Accept a single incoming connection and use it.
 --
@@ -93,12 +97,12 @@ accept
                       -- connection is accepted. Takes the connection socket
                       -- and remote end address.
   -> IO b
-accept cpk = accept' params where
+accept cpk = acceptParams params where
     params = defModServerParams cpk T.defaultParamsServer
 {-# INLINABLE accept #-}
 
 
-accept'
+acceptParams
   :: T.Params
   -> NS.Socket        -- ^Listening and bound socket.
   -> ((T.Context, NS.SockAddr) -> IO b)
@@ -106,12 +110,11 @@ accept'
                       -- connection is accepted. Takes the connection socket
                       -- and remote end address.
   -> IO b
-accept' params lsock k = do
-    (csock,caddr) <- NS.accept lsock
-    h <- NS.socketToHandle csock ReadWriteMode
-    ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
-    E.finally (T.handshake ctx >> k (ctx,caddr)) (hClose h)
-{-# INLINABLE accept' #-}
+acceptParams params lsock k = do
+    conn@(ctx,_) <- acceptTls params lsock
+    E.finally (T.handshake ctx >> k conn)
+              (T.backendClose $ T.ctxConnection ctx)
+{-# INLINABLE acceptParams #-}
 
 
 acceptFork
@@ -122,12 +125,12 @@ acceptFork
                       -- connection is accepted. Takes the connection socket
                       -- and remote end address.
   -> IO ThreadId
-acceptFork cpk = acceptFork' params where
+acceptFork cpk = acceptForkParams params where
     params = defModServerParams cpk T.defaultParamsServer
 {-# INLINABLE acceptFork #-}
 
 
-acceptFork'
+acceptForkParams
   :: T.Params
   -> NS.Socket        -- ^Listening and bound socket.
   -> ((T.Context, NS.SockAddr) -> IO ())
@@ -135,9 +138,13 @@ acceptFork'
                       -- connection is accepted. Takes the connection socket
                       -- and remote end address.
   -> IO ThreadId
-acceptFork' = (((forkIO.).).) accept'
-{-# INLINABLE acceptFork' #-}
+acceptForkParams params lsock k = do
+    conn@(ctx,_) <- acceptTls params lsock
+    forkIO $ E.finally (T.handshake ctx >> k conn)
+                       (T.backendClose $ T.ctxConnection ctx)
+{-# INLINABLE acceptForkParams #-}
 
+--------------------------------------------------------------------------------
 
 connect
   :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates
@@ -151,10 +158,10 @@ connect certs host port f = do
     cstore <- getSystemCertificateStore
     let check = defCheckCerts cstore host
         params = defModClientParams certs check host T.defaultParamsClient
-    connect' params host port f
+    connectParams params host port f
 
 
-connect'
+connectParams
   :: T.Params
   -> NS.HostName      -- ^Server hostname.
   -> NS.ServiceName   -- ^Server service port.
@@ -162,24 +169,36 @@ connect'
                       -- ^Computation taking the TLS communication context
                       -- and the server address.
   -> IO r
-connect' params host port f = E.bracket acq rel use where
+connectParams params host port f = E.bracket acq rel use where
     acq = connectTls params host port
     rel = T.backendClose . T.ctxConnection . fst
     use x@(ctx,_) = T.handshake ctx >> E.finally (f x) (T.bye ctx)
 
+--------------------------------------------------------------------------------
 
 -- | Similar to 'S.connectSock', except it returns a secure TLS 'T.Context'
 -- instead of a 'NS.Socket'.
 --
--- A handshake is performed after establishing the connection.
+-- You need to call 'T.handshake' on the resulting 'T.Context' afterwards.
 connectTls :: T.Params -> NS.HostName -> NS.ServiceName
            -> IO (T.Context, NS.SockAddr)
 connectTls params host port = do
-    (sock, addr) <- S.connectSock host port
-    h <- NS.socketToHandle sock ReadWriteMode
+    (csock, caddr) <- S.connectSock host port
+    h <- NS.socketToHandle csock ReadWriteMode
     ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
-    T.handshake ctx `E.onException` hClose h
-    return (ctx, addr)
+    return (ctx, caddr)
+
+
+-- | Similar to 'NS.accept', except it returns a secure TLS 'T.Context'
+-- instead of a 'NS.Socket'.
+--
+-- You need to call 'T.handshake' on the resulting 'T.Context' afterwards.
+acceptTls :: T.Params -> NS.Socket -> IO (T.Context, NS.SockAddr)
+acceptTls params lsock = do
+    (csock, caddr) <- NS.accept lsock
+    h <- NS.socketToHandle csock ReadWriteMode
+    ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
+    return (ctx, caddr)
 
 
 --------------------------------------------------------------------------------

@@ -137,7 +137,7 @@ acceptParams
 acceptParams params lsock k = do
     conn@(ctx,_) <- acceptTls params lsock
     E.finally (T.handshake ctx >> k conn)
-              (T.backendClose (T.ctxConnection ctx))
+              (T.bye ctx >> T.backendClose (T.ctxConnection ctx))
 {-# INLINABLE acceptParams #-}
 
 
@@ -171,7 +171,7 @@ acceptForkParams
 acceptForkParams params lsock k = do
     conn@(ctx,_) <- acceptTls params lsock
     forkIO $ E.finally (T.handshake ctx >> k conn)
-                       (T.backendClose (T.ctxConnection ctx))
+                       (T.bye ctx >> T.backendClose (T.ctxConnection ctx))
 {-# INLINABLE acceptForkParams #-}
 
 --------------------------------------------------------------------------------

@@ -221,10 +221,10 @@ connectParams
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connectParams params host port f = E.bracket acq rel use where
-    acq = connectTls params host port
-    rel = T.backendClose . T.ctxConnection . fst
-    use x@(ctx,_) = T.handshake ctx >> E.finally (f x) (T.bye ctx)
+connectParams params host port f =
+    E.bracket (connectTls params host port)
+              (T.backendClose . T.ctxConnection . fst)
+              (\x@(ctx,_) -> T.handshake ctx >> E.finally (f x) (T.bye ctx))
 
 --------------------------------------------------------------------------------
 

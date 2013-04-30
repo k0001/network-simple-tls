@@ -26,10 +26,6 @@ module Network.Simple.TCP.TLS (
   , S.bindSock
   , connectTls
   , acceptTls
-
-  -- * Default values
-  , setDefaultServerParams
-  , setDefaultClientParams
   ) where
 
 import           Control.Concurrent         (ThreadId, forkIO)
@@ -50,13 +46,20 @@ import           System.Certificate.X509    (getSystemCertificateStore)
 -- | Start a TLS-secured TCP server that accepts incoming connections and
 -- handles each of them concurrently, in different threads.
 --
--- The TLS connection is configured with the given 'X509' certificate and
--- 'T.PrivateKey' using some default settings (see 'setDefaultServerParams').
--- Use 'serveParams' if you need more control on how the TLS connection is
--- configured.
---
 -- The listening and connection sockets are closed when done or in case of
 -- exceptions.
+--
+-- The TLS connection is configured with the given 'X509' certificate and
+-- 'T.PrivateKey' using some default settings. Use 'serveParams' if you need
+-- more control on how the TLS connection is configured.
+--
+-- Default TLS connection settings:
+--
+-- * Versions: 'T.TLS11', 'T.TLS12'
+--
+-- * Cyphers: 'TE.ciphersuite_medium'
+--
+-- * Do not request a certificate from client.
 --
 -- Note: If you use this function then you don't need to manually use 'listen'
 -- nor 'acceptFork', nor manually close the obtained 'T.Context', nor perform a
@@ -71,7 +74,7 @@ serve
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO ()
-serve cpk = serveParams $ setDefaultServerParams cpk T.defaultParamsServer
+serve cpk = serveParams $ defaultSetServerParams cpk T.defaultParamsServer
 
 
 -- | Like 'serve', except you can give explicit TLS configuration 'T.Params'.
@@ -94,14 +97,21 @@ serveParams params hp port k = do
 -- | Accept a single incomming TLS-secured TCP connection, perform a TLS
 -- handshake and use the connection.
 --
--- The TLS connection is configured with the given 'X509' certificate and
--- 'T.PrivateKey' using some default settings (see 'setDefaultServerParams').
--- Use 'acceptParams' if you need more control on how the TLS connection is
--- configured.
---
 -- The connection socket is closed when done or in case of exceptions. If you
 -- need to manage the lifetime of the connection resources yourself, then use
 -- 'acceptTls' instead.
+--
+-- The TLS connection is configured with the given 'X509' certificate and
+-- 'T.PrivateKey' using some default settings. Use 'acceptParams' if you need
+-- more control on how the TLS connection is configured.
+--
+-- Default TLS connection details:
+--
+-- * Versions: 'T.TLS11', 'T.TLS12'
+--
+-- * Cyphers: 'TE.ciphersuite_medium'
+--
+-- * Do not request a certificate from client.
 accept
   :: (X509, T.PrivateKey) -- ^Server certificate and private key.
   -> NS.Socket            -- ^Listening and bound socket.
@@ -111,7 +121,7 @@ accept
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO b
-accept cpk = acceptParams (setDefaultServerParams cpk T.defaultParamsServer)
+accept cpk = acceptParams (defaultSetServerParams cpk T.defaultParamsServer)
 {-# INLINABLE accept #-}
 
 -- | Like 'accept', except you can give explicit TLS configuration 'T.Params'.
@@ -143,7 +153,7 @@ acceptFork
                           -- TLS connection context and remote end address.
   -> IO ThreadId
 acceptFork cpk =
-    acceptForkParams (setDefaultServerParams cpk T.defaultParamsServer)
+    acceptForkParams (defaultSetServerParams cpk T.defaultParamsServer)
 {-# INLINABLE acceptFork #-}
 
 
@@ -171,16 +181,22 @@ acceptForkParams params lsock k = do
 -- A TLS handshake is performed immediately after establishing the TCP
 -- connection.
 --
--- By default the TLS connection is configured to use any of the given 'X509'
--- certificate and 'T.PrivateKey's, or any the ones made available by the
--- operating system. See 'setDefaultClientParams' for details. Use 'serveParams'
--- if you need more control on how the TLS connection is configured.
---
 -- The connection socket is closed when done or in case of exceptions. If you
 -- need to manage the lifetime of the connection resources yourself, then use
 -- 'connectTls' instead.
+--
+-- By default the TLS connection is configured to use any of the given 'X509'
+-- certificate and 'T.PrivateKey's, or any the ones made available by the
+-- operating system. Use 'serveParams' if you need more control on how the TLS
+-- connection is configured.
+--
+-- Default TLS connection settings:
+--
+-- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
+--
+-- * Cyphers: 'TE.ciphersuite_all'
 connect
-  :: [(X509, Maybe T.PrivateKey)] -- ^Extra certificates and private keys.
+  :: [(X509, Maybe T.PrivateKey)] -- ^Certificates and private keys.
   -> NS.HostName                  -- ^Server hostname.
   -> NS.ServiceName               -- ^Server service port.
   -> ((T.Context, NS.SockAddr) -> IO r)
@@ -190,8 +206,8 @@ connect
   -> IO r
 connect certs host port f = do
     cstore <- getSystemCertificateStore
-    let check = defCheckCerts cstore host
-        params = setDefaultClientParams certs check host T.defaultParamsClient
+    let check = defaultCheckCerts cstore host
+        params = defaultSetClientParams certs check host T.defaultParamsClient
     connectParams params host port f
 
 
@@ -240,27 +256,27 @@ acceptTls params lsock = do
 
 
 --------------------------------------------------------------------------------
--- Internal utilities
+-- Default values
 
--- | Default approach to verifying certificates
-defCheckCerts :: CertificateStore -> NS.HostName -> [X509]
-              -> IO T.CertificateUsage
-defCheckCerts certStore host = TE.certificateChecks
-    [ TE.certificateVerifyChain certStore
-    , return . TE.certificateVerifyDomain host
-    ]
+-- | Default 'T.Params' setter for the server side of a TLS connection.
+defaultSetServerParams
+  :: (X509, T.PrivateKey) -- ^Server certificate and private key.
+  -> T.Params -> T.Params
+defaultSetServerParams (cert, pk) p =
+    let modSParams sp = sp
+          { T.serverWantClientCert = False }
+    in T.updateServerParams modSParams $ p
+          { T.pAllowedVersions = [T.TLS11, T.TLS12]
+          , T.pCiphers         = TE.ciphersuite_medium
+          , T.pCertificates    = [(cert, Just pk)] }
 
 -- | Default 'T.Params' setter for the client side of a TLS connection.
---
--- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
---
--- * Cyphers: 'TE.ciphersuite_all'
-setDefaultClientParams
+defaultSetClientParams
   :: [(X509, Maybe T.PrivateKey)]      -- ^Client certificates and private keys.
   -> ([X509] -> IO T.CertificateUsage) -- ^Verifies server certificates chain.
   -> NS.HostName                       -- ^Server hostname.
   -> T.Params -> T.Params
-setDefaultClientParams certs onCerts host p =
+defaultSetClientParams certs onCerts host p =
     let modCParams cp = cp
           { T.onCertificateRequest = const (return certs)
           , T.clientUseServerName  = Just host }
@@ -270,20 +286,15 @@ setDefaultClientParams certs onCerts host p =
           , T.pCertificates      = certs
           , T.pCiphers           = TE.ciphersuite_all }
 
--- | Default 'T.Params' setter for the server side of a TLS connection.
---
--- * Versions: 'T.TLS11', 'T.TLS12'
---
--- * Cyphers: 'TE.ciphersuite_medium'
---
--- * Do not request a certificate from client.
-setDefaultServerParams
-  :: (X509, T.PrivateKey) -- ^Server certificate and private key.
-  -> T.Params -> T.Params
-setDefaultServerParams (cert, pk) p =
-    let modSParams sp = sp
-          { T.serverWantClientCert = False }
-    in T.updateServerParams modSParams $ p
-          { T.pAllowedVersions = [T.TLS11, T.TLS12]
-          , T.pCiphers         = TE.ciphersuite_medium
-          , T.pCertificates    = [(cert, Just pk)] }
+-- | Default approach to verifying a certificate chain.
+defaultCheckCerts
+  :: CertificateStore -- ^Valid certificate store to check against
+                      -- (see 'getSystemCertificateStore').
+  -> NS.HostName      -- ^Server hostname to verify.
+  -> [X509]           -- ^Certificate chain.
+  -> IO T.CertificateUsage
+defaultCheckCerts certStore host = TE.certificateChecks
+    [ TE.certificateVerifyChain certStore
+    , return . TE.certificateVerifyDomain host
+    ]
+

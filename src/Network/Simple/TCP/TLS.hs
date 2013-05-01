@@ -33,6 +33,7 @@ import qualified Control.Exception          as E
 import           Control.Monad              (forever)
 import           Data.Certificate.X509      (X509)
 import           Data.CertificateStore      (CertificateStore)
+import qualified GHC.IO.Exception           as Eg
 import           System.IO                  (IOMode(ReadWriteMode))
 import qualified Network.Simple.TCP         as S
 import qualified Network.Socket             as NS
@@ -295,11 +296,18 @@ useTlsThenClose :: ((T.Context, NS.SockAddr) -> IO a)
                 -> (T.Context, NS.SockAddr) -> IO a
 useTlsThenClose k conn@(ctx,_) =
     E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
-              (T.contextClose ctx)
+              (contextClose' ctx)
+  where
+    -- If the remote end closes the connection first we might get some
+    -- exceptions. These wrappers work around those exceptions.
+    contextClose' = ignoreResourceVanishedErrors . T.contextClose
+    bye'          = ignoreResourceVanishedErrors . T.bye
 {-# INLINE useTlsThenClose #-}
 
--- | Perform 'T.bye' on the given context, swallowing any exceptions which might
--- happen if the remote end closed the connection before.
-bye' :: T.Context -> IO ()
-bye' = E.handle (\e -> let _ = e :: E.SomeException in return ()) . T.bye
-{-# INLINE bye' #-}
+-- | Perform the given action, swallowing any 'E.IOException' of type
+-- 'Eg.ResourceVanished' if it happens.
+ignoreResourceVanishedErrors :: IO () -> IO ()
+ignoreResourceVanishedErrors = E.handle (\e -> case e of
+    Eg.IOError{} | Eg.ioe_type e == Eg.ResourceVanished -> return ()
+    _ -> E.throwIO e)
+{-# INLINE ignoreResourceVanishedErrors #-}

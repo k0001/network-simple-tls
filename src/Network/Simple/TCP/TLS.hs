@@ -134,10 +134,7 @@ acceptParams
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO b
-acceptParams params lsock k = do
-    conn@(ctx,_) <- acceptTls params lsock
-    E.finally (T.handshake ctx >> E.finally (k conn) (ignoreErrors (T.bye ctx)))
-              (T.contextClose ctx)
+acceptParams p lsock k = useTlsThenClose k =<< acceptTls p lsock
 {-# INLINABLE acceptParams #-}
 
 
@@ -168,10 +165,7 @@ acceptForkParams
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO ThreadId
-acceptForkParams params lsock k = do
-    conn@(ctx,_) <- acceptTls params lsock
-    forkIO $ E.finally (T.handshake ctx >> E.finally (k conn) (ignoreErrors (T.bye ctx)))
-                       (T.contextClose ctx)
+acceptForkParams p lsock k = forkIO . useTlsThenClose k =<< acceptTls p lsock
 {-# INLINABLE acceptForkParams #-}
 
 --------------------------------------------------------------------------------
@@ -222,10 +216,7 @@ connectParams
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connectParams params host port k = do
-    conn@(ctx,_) <- connectTls params host port
-    E.finally (T.handshake ctx >> E.finally (k conn) (ignoreErrors (T.bye ctx)))
-              (ignoreErrors (T.contextClose ctx))
+connectParams p host port k = useTlsThenClose k =<< connectTls p host port
 
 --------------------------------------------------------------------------------
 
@@ -300,5 +291,15 @@ defaultCheckCerts certStore host = TE.certificateChecks
 --------------------------------------------------------------------------------
 -- Internal stuff
 
-ignoreErrors :: IO () -> IO ()
-ignoreErrors = E.handle (\e -> let _ = e :: E.SomeException in return ())
+useTlsThenClose :: ((T.Context, NS.SockAddr) -> IO a)
+                -> (T.Context, NS.SockAddr) -> IO a
+useTlsThenClose k conn@(ctx,_) =
+    E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
+              (T.contextClose ctx)
+{-# INLINE useTlsThenClose #-}
+
+-- | Perform 'T.bye' on the given context, swallowing any exceptions which might
+-- happen if the remote end closed the connection before.
+bye' :: T.Context -> IO ()
+bye' = E.handle (\e -> let _ = e :: E.SomeException in return ()) . T.bye
+{-# INLINE bye' #-}

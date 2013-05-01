@@ -196,7 +196,7 @@ acceptForkParams params lsock k = do
 --
 -- * Cyphers: 'TE.ciphersuite_all'
 connect
-  :: [(X509, Maybe T.PrivateKey)] -- ^Certificates and private keys.
+  :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
   -> NS.HostName                  -- ^Server hostname.
   -> NS.ServiceName               -- ^Server service port.
   -> ((T.Context, NS.SockAddr) -> IO r)
@@ -288,8 +288,7 @@ defaultSetClientParams certs onCerts host p =
 
 -- | Default approach to verifying a certificate chain.
 defaultCheckCerts
-  :: CertificateStore -- ^Valid certificate store to check against
-                      -- (see 'getSystemCertificateStore').
+  :: CertificateStore -- ^Trusted certificate store to check against.
   -> NS.HostName      -- ^Server hostname to verify.
   -> [X509]           -- ^Certificate chain.
   -> IO T.CertificateUsage

@@ -39,15 +39,13 @@ import qualified Network.Socket             as NS
 import qualified Network.TLS                as T
 import           Network.TLS.Extra          as TE
 import           Crypto.Random.API          (getSystemRandomGen)
+-- Impored so Haddock can properly link the documentation.
 import           System.Certificate.X509    (getSystemCertificateStore)
 
 --------------------------------------------------------------------------------
 
 -- | Start a TLS-secured TCP server that accepts incoming connections and
 -- handles each of them concurrently, in different threads.
---
--- The listening and connection sockets are closed when done or in case of
--- exceptions.
 --
 -- The TLS connection is configured with the given 'X509' certificate and
 -- 'T.PrivateKey' using some default settings. Use 'serveParams' if you need
@@ -61,9 +59,10 @@ import           System.Certificate.X509    (getSystemCertificateStore)
 --
 -- * Do not request a certificate from client.
 --
--- Note: If you use this function then you don't need to manually use 'listen'
--- nor 'acceptFork', nor manually close the obtained 'T.Context', nor perform a
--- TLS 'T.handshake'. All that is already handled for you.
+-- Any acquired network resources are properly closed and discarded when done or
+-- in case of exceptions. This function performs 'listen', 'acceptFork',
+-- 'T.handshake' and 'T.bye' for you, don't perform those manually when using
+-- 'serve'.
 serve
   :: (X509, T.PrivateKey) -- ^Server certificate and private key.
   -> S.HostPreference     -- ^Preferred host to bind.
@@ -97,10 +96,6 @@ serveParams params hp port k = do
 -- | Accept a single incomming TLS-secured TCP connection, perform a TLS
 -- handshake and use the connection.
 --
--- The connection socket is closed when done or in case of exceptions. If you
--- need to manage the lifetime of the connection resources yourself, then use
--- 'acceptTls' instead.
---
 -- The TLS connection is configured with the given 'X509' certificate and
 -- 'T.PrivateKey' using some default settings. Use 'acceptParams' if you need
 -- more control on how the TLS connection is configured.
@@ -112,6 +107,11 @@ serveParams params hp port k = do
 -- * Cyphers: 'TE.ciphersuite_medium'
 --
 -- * Do not request a certificate from client.
+--
+-- Any acquired network resources are properly closed and discarded when done or
+-- in case of exceptions. This function performs 'T.handshake' and 'T.bye' for
+-- you, don't perform those manually when using 'accept'. If you need to manage
+-- the lifetime of the connection resources yourself, use 'acceptTls' instead.
 accept
   :: (X509, T.PrivateKey) -- ^Server certificate and private key.
   -> NS.Socket            -- ^Listening and bound socket.
@@ -141,8 +141,8 @@ acceptParams params lsock k = do
 {-# INLINABLE acceptParams #-}
 
 
--- | Like 'accept', except it performs the TLS hanshake and runs the given
--- computation in a different thread.
+-- | Like 'accept', except it uses a different thread to performs the TLS
+-- handshake and run the given computation.
 acceptFork
   :: (X509, T.PrivateKey) -- ^Server certificate and private key.
   -> NS.Socket            -- ^Listening and bound socket.
@@ -181,13 +181,10 @@ acceptForkParams params lsock k = do
 -- A TLS handshake is performed immediately after establishing the TCP
 -- connection.
 --
--- The connection socket is closed when done or in case of exceptions. If you
--- need to manage the lifetime of the connection resources yourself, then use
--- 'connectTls' instead.
---
--- By default the TLS connection is configured to use any of the given 'X509'
--- certificate and 'T.PrivateKey's, or any the ones made available by the
--- operating system. Use 'serveParams' if you need more control on how the TLS
+-- The TLS connection will use any of the given client 'X509' certificates and
+-- 'T.PrivateKey's. The server certificate is verified against the given CAs
+-- 'CertificateStore'; use 'getSystemCertificateStore' to obtain the operating
+-- system's default. Use 'serveParams' if you need more control on how the TLS
 -- connection is configured.
 --
 -- Default TLS connection settings:
@@ -195,8 +192,13 @@ acceptForkParams params lsock k = do
 -- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
 --
 -- * Cyphers: 'TE.ciphersuite_all'
+--
+-- The connection is properly closed when done or in case of exceptions. If you
+-- need to manage the lifetime of the connection resources yourself, then use
+-- 'connectTls' instead.
 connect
-  :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
+  :: CertificateStore             -- ^CAs used to verify the server certificate.
+  -> [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
   -> NS.HostName                  -- ^Server hostname.
   -> NS.ServiceName               -- ^Server service port.
   -> ((T.Context, NS.SockAddr) -> IO r)
@@ -204,8 +206,7 @@ connect
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connect certs host port f = do
-    cstore <- getSystemCertificateStore
+connect cstore certs host port f = do
     let check = defaultCheckCerts cstore host
         params = defaultSetClientParams certs check host T.defaultParamsClient
     connectParams params host port f
@@ -232,7 +233,7 @@ connectParams params host port f =
 -- using the given 'T.Params', instead of a 'NS.Socket'.
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
--- for communication purposes.
+-- for communication purposes, and 'T.bye' afterwards.
 connectTls :: T.Params -> NS.HostName -> NS.ServiceName
            -> IO (T.Context, NS.SockAddr)
 connectTls params host port = do
@@ -246,7 +247,7 @@ connectTls params host port = do
 -- using the given 'T.Params', instead of a 'NS.Socket'.
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
--- for communication purposes.
+-- for communication purposes, and 'T.bye' afterwards.
 acceptTls :: T.Params -> NS.Socket -> IO (T.Context, NS.SockAddr)
 acceptTls params lsock = do
     (csock, caddr) <- NS.accept lsock

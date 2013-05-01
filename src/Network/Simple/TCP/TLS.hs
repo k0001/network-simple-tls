@@ -136,8 +136,8 @@ acceptParams
   -> IO b
 acceptParams params lsock k = do
     conn@(ctx,_) <- acceptTls params lsock
-    E.finally (T.handshake ctx >> k conn)
-              (T.bye ctx >> T.backendClose (T.ctxConnection ctx))
+    E.finally (T.handshake ctx >> E.finally (k conn) (ignoreErrors (T.bye ctx)))
+              (T.contextClose ctx)
 {-# INLINABLE acceptParams #-}
 
 
@@ -170,8 +170,8 @@ acceptForkParams
   -> IO ThreadId
 acceptForkParams params lsock k = do
     conn@(ctx,_) <- acceptTls params lsock
-    forkIO $ E.finally (T.handshake ctx >> k conn)
-                       (T.bye ctx >> T.backendClose (T.ctxConnection ctx))
+    forkIO $ E.finally (T.handshake ctx >> E.finally (k conn) (ignoreErrors (T.bye ctx)))
+                       (T.contextClose ctx)
 {-# INLINABLE acceptForkParams #-}
 
 --------------------------------------------------------------------------------
@@ -222,10 +222,10 @@ connectParams
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connectParams params host port f =
-    E.bracket (connectTls params host port)
-              (T.backendClose . T.ctxConnection . fst)
-              (\x@(ctx,_) -> T.handshake ctx >> E.finally (f x) (T.bye ctx))
+connectParams params host port k = do
+    conn@(ctx,_) <- connectTls params host port
+    E.finally (T.handshake ctx >> E.finally (k conn) (ignoreErrors (T.bye ctx)))
+              (ignoreErrors (T.contextClose ctx))
 
 --------------------------------------------------------------------------------
 
@@ -254,7 +254,6 @@ acceptTls params lsock = do
     h <- NS.socketToHandle csock ReadWriteMode
     ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
     return (ctx, caddr)
-
 
 --------------------------------------------------------------------------------
 -- Default values
@@ -298,3 +297,8 @@ defaultCheckCerts certStore host = TE.certificateChecks
     , return . TE.certificateVerifyDomain host
     ]
 
+--------------------------------------------------------------------------------
+-- Internal stuff
+
+ignoreErrors :: IO () -> IO ()
+ignoreErrors = E.handle (\e -> let _ = e :: E.SomeException in return ())

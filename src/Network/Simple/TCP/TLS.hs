@@ -26,6 +26,9 @@ module Network.Simple.TCP.TLS (
   , S.bindSock
   , connectTls
   , acceptTls
+
+  -- * Exports
+  , S.HostPreference(..)
   ) where
 
 import           Control.Concurrent         (ThreadId, forkIO)

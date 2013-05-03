@@ -1,4 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ExistentialQuantification #-}
+
 -- | This module exports common usage patterns for establishing TLS-secured
 -- TCP connections, relevant to both the client side and server side of the
 -- connection.
@@ -57,31 +59,40 @@ import           System.Certificate.X509    (getSystemCertificateStore)
 -- Client side TLS settings
 
 data ClientSettings
-  = ClientSettingsSimple
+  = ClientSettings T.Params
+  | forall s. T.SessionManager s => ClientSettingsSimple
     { csCACertificates    :: CertificateStore
     -- ^CAs used to verify the server certificate.
     , csCredentials       :: [(X509, Maybe T.PrivateKey)]
     -- ^Client certificates and private keys.
     , csServerName        :: Maybe NS.HostName
     -- ^Explicit Server Name Identification.
+    , csSessionManager    :: s
+    -- ^Session manager to use. Use to 'NoSessionManager' to disable sessions.
     }
-  | ClientSettings T.Params
 
 -- | 'T.Params' projection of the given 'ClientSettings'.
 csParams :: ClientSettings -> T.Params
 csParams (ClientSettings p)       = p
 csParams ClientSettingsSimple{..} =
-    let modCParams cp = cp
-          { T.onCertificateRequest = const (return csCredentials)
-          , T.clientUseServerName  = csServerName }
-    in T.updateClientParams modCParams $ T.defaultParamsClient
-          { T.pAllowedVersions     = [T.TLS10, T.TLS11, T.TLS12]
-          , T.onCertificatesRecv   = certsServerCheck
-          , T.pCertificates        = csCredentials
-          , T.pCiphers             = TE.ciphersuite_all }
+    T.updateClientParams modClientParams
+        . T.setSessionManager csSessionManager
+        . modParamsCore
+        $ T.defaultParamsClient
   where
-    certsServerCheck = TE.certificateChecks $ mconcat
-      [ [TE.certificateVerifyChain csCACertificates ]
+    modParamsCore p = p
+      { T.pAllowedVersions     = [T.TLS10, T.TLS11, T.TLS12]
+      , T.onCertificatesRecv   = serverCertsCheck
+      , T.pCertificates        = csCredentials
+      , T.pCiphers             = TE.ciphersuite_all
+      , T.pUseSession          = True }
+
+    modClientParams cp = cp
+      { T.onCertificateRequest = const (return csCredentials)
+      , T.clientUseServerName  = csServerName }
+
+    serverCertsCheck = TE.certificateChecks $ mconcat
+      [ [TE.certificateVerifyChain csCACertificates]
       , case csServerName of
           Nothing   -> []
           Just host -> [return . TE.certificateVerifyDomain host]
@@ -101,39 +112,50 @@ mkClientSettingsDefault
   -> ClientSettings
 mkClientSettingsDefault cStore =
     ClientSettingsSimple
-    { csCACertificates    = cStore
-    , csCredentials = []
-    , csServerName        = Nothing
+    { csCACertificates = cStore
+    , csCredentials    = []
+    , csServerName     = Nothing
+    , csSessionManager = T.NoSessionManager
     }
 
 --------------------------------------------------------------------------------
 -- Server side TLS settings
 
 data ServerSettings
-  = ServerSettingsSimple
+  = ServerSettings T.Params
+  | forall s. T.SessionManager s => ServerSettingsSimple
     { ssCertificate    :: X509          -- ^Server certificate.
     , ssPrivateKey     :: T.PrivateKey  -- ^Server private key.
     , ssCACertificates :: Maybe CertificateStore
     -- ^CAs used to verify the client certificate. If specified , then a client
     -- certificate will be expected during on handshake.
+    , ssSessionManager :: s
+    -- ^Session manager to use, if specified.
     }
-  | ServerSettings T.Params
 
 -- | 'T.Params' projection of the given 'ServerSettings'.
 ssParams :: ServerSettings -> T.Params
 ssParams (ServerSettings p)       = p
 ssParams ServerSettingsSimple{..} =
-    let modSParams sp = sp
-          { T.serverWantClientCert = maybe False (const True) ssCACertificates
-          , T.onClientCertificate  = checkClientCerts }
-    in T.updateServerParams modSParams $ T.defaultParamsServer
-          { T.pAllowedVersions     = [T.TLS11, T.TLS12]
-          , T.pCiphers             = TE.ciphersuite_medium
-          , T.pCertificates        = [(ssCertificate, Just ssPrivateKey)] }
+    T.updateServerParams modServerParams
+        . T.setSessionManager ssSessionManager
+        . modParamsCore
+        $ T.defaultParamsServer
   where
-    checkClientCerts certs = case ssCACertificates of
+    modParamsCore p = p
+      { T.pAllowedVersions     = [T.TLS11, T.TLS12]
+      , T.pCiphers             = TE.ciphersuite_medium
+      , T.pCertificates        = [(ssCertificate, Just ssPrivateKey)]
+      , T.pUseSession          = True }
+
+    modServerParams sp = sp
+      { T.serverWantClientCert = maybe False (const True) ssCACertificates
+      , T.onClientCertificate  = clientCertsCheck }
+
+    clientCertsCheck certs = case ssCACertificates of
       Nothing -> return T.CertificateUsageAccept
       Just cs -> TE.certificateVerifyChain cs certs
+
 
 -- | Make a default 'ServerSettingsSimple'.
 --
@@ -153,6 +175,7 @@ mkServerSettingsDefault cert pk =
     { ssCertificate    = cert
     , ssPrivateKey     = pk
     , ssCACertificates = Nothing
+    , ssSessionManager = T.NoSessionManager
     }
 
 -- | Start a TLS-secured TCP server that accepts incoming connections and

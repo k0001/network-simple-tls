@@ -19,7 +19,6 @@ module Network.Simple.TCP.TLS (
   -- ** TLS Settings
   , ServerSettings
   , serverSettings
-  , getDefaultClientSettings
   , modifyServerParams
 
   -- * Client side
@@ -27,6 +26,7 @@ module Network.Simple.TCP.TLS (
   -- ** TLS Settings
   , ClientSettings
   , clientSettings
+  , getDefaultClientSettings
   , modifyClientParams
 
   -- * Low level support
@@ -55,6 +55,10 @@ import           System.IO                  (IOMode(ReadWriteMode))
 --------------------------------------------------------------------------------
 -- Client side TLS settings
 
+-- | Opaque type representing the configuration settings for a TLS client.
+--
+-- Use 'clientSettings' or 'getDefaultClientSettings' to obtain your
+-- 'ClientSettings' value.
 data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 
 -- | Get the default system 'ClientSettings'.
@@ -112,6 +116,9 @@ modifyClientParams f = ClientSettings . f . unClientSettings
 --------------------------------------------------------------------------------
 -- Server side TLS settings
 
+-- | Opaque type representing the configuration settings for a TLS server.
+--
+-- Use 'serverSettings' to obtain your 'ServerSettings' value.
 data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 
 -- | Make basic 'ServerSettings'.

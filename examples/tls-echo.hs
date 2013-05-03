@@ -16,14 +16,16 @@ import           Network.TLS.Extra          as TE
 import           System.Console.GetOpt
 import           System.Environment         (getProgName, getArgs)
 
-server :: (X509, T.PrivateKey) -> Z.HostPreference -> NS.ServiceName -> IO ()
-server cpk hp port = do
-    Z.serve cpk hp port $ \(ctx,caddr) -> do
+server :: X509 -> T.PrivateKey -> Z.HostPreference -> NS.ServiceName -> IO ()
+server cert pk hp port = do
+    let ss = Z.mkServerSettingsDefault cert pk
+    Z.serve ss hp port $ \(ctx,caddr) -> do
        putStrLn $ show caddr <> " joined."
        consume ctx $ \bs -> do
          putStrLn $ show caddr <> " says: " <> show (B.unpack bs)
          T.sendData ctx $ BL.fromChunks [B.map toUpper bs]
        putStrLn $ show caddr <> " quit."
+
 
 -- | Repeatedly receive data from the given 'T.Context' until exhausted,
 -- performing the given action on each received chunk.
@@ -42,7 +44,7 @@ main = do
     case getOpt RequireOrder options args of
       (actions, [hostname,port], _) -> do
         opts <- foldl (>>=) (return defaultOptions) actions
-        server (optServerCert opts, optServerKey opts) (Z.Host hostname) port
+        server (optServerCert opts) (optServerKey opts) (Z.Host hostname) port
       (_,_,msgs) -> do
         pn <- getProgName
         let header = "Usage: " <> pn <> " [OPTIONS] HOSTNAME PORT"

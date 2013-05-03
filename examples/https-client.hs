@@ -21,10 +21,16 @@ import           System.Environment         (getProgName, getArgs)
 
 client :: CertificateStore -> [(X509, Maybe T.PrivateKey)] -> NS.HostName
        -> NS.ServiceName -> IO ()
-client cStore certs host port = do
-    Z.connect cStore certs host port $ \(ctx,_) -> do
+client cStore creds host port = do
+    Z.connect csettings host port $ \(ctx,_) -> do
        T.sendData ctx "GET / HTTP/1.0\r\n\r\n"
        consume ctx B.putStr >> putStrLn ""
+  where
+    csettings = Z.ClientSettingsSimple
+                { Z.csCredentials    = creds
+                , Z.csServerName     = Just host
+                , Z.csCACertificates = cStore
+                }
 
 -- | Repeatedly receive data from the given 'T.Context' until exhausted,
 -- performing the given action on each received chunk.

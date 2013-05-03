@@ -18,7 +18,7 @@ import           System.Environment         (getProgName, getArgs)
 
 server :: X509 -> T.PrivateKey -> Z.HostPreference -> NS.ServiceName -> IO ()
 server cert pk hp port = do
-    let ss = Z.mkServerSettingsDefault cert pk
+    let ss = Z.serverSettings cert pk Nothing
     Z.serve ss hp port $ \(ctx,caddr) -> do
        putStrLn $ show caddr <> " joined."
        consume ctx $ \bs -> do

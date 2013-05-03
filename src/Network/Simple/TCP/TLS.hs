@@ -19,6 +19,7 @@ module Network.Simple.TCP.TLS (
   -- ** TLS Settings
   , ServerSettings
   , serverSettings
+  , getDefaultClientSettings
   , modifyServerParams
 
   -- * Client side
@@ -40,28 +41,39 @@ module Network.Simple.TCP.TLS (
 import           Control.Concurrent         (ThreadId, forkIO)
 import qualified Control.Exception          as E
 import           Control.Monad              (forever)
+import           Crypto.Random.API          (getSystemRandomGen)
 import           Data.Certificate.X509      (X509)
 import           Data.CertificateStore      (CertificateStore)
-import           Data.Monoid                (mconcat)
 import qualified GHC.IO.Exception           as Eg
-import           System.IO                  (IOMode(ReadWriteMode))
 import qualified Network.Simple.TCP         as S
 import qualified Network.Socket             as NS
 import qualified Network.TLS                as T
 import           Network.TLS.Extra          as TE
-import           Crypto.Random.API          (getSystemRandomGen)
-
--- Imported so Haddock can properly link the documentation.
 import           System.Certificate.X509    (getSystemCertificateStore)
+import           System.IO                  (IOMode(ReadWriteMode))
 
 --------------------------------------------------------------------------------
 -- Client side TLS settings
 
 data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 
+-- | Get the default system 'ClientSettings'.
+--
+-- Use 'modifyClientParams' to modify the TLS 'T.Params'.
+--
+-- Default TLS connection settings:
+--
+-- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
+--
+-- * Cyphers: 'TE.ciphersuite_all'
+getDefaultClientSettings :: IO ClientSettings
+getDefaultClientSettings =
+    clientSettings [] Nothing `fmap` getSystemCertificateStore
+
+
 -- | Make basic 'ClientSettings'.
 --
--- Use 'csUpdateParams' to modify the TLS
+-- Use 'modifyClientParams' to modify the TLS 'T.Params'.
 --
 -- Default TLS connection settings:
 --
@@ -69,22 +81,21 @@ data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 --
 -- * Cyphers: 'TE.ciphersuite_all'
 clientSettings
-  :: [(X509, Maybe T.PrivateKey)]
-                       -- ^Client certificates and private keys.
-  -> Maybe NS.HostName -- ^Explicit Server Name Identification.
-  -> CertificateStore  -- ^CAs used to verify the server certificate. Use
-                       -- 'getSystemCertificateStore' to obtaing the operating
-                       -- system's defaults.
+  :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
+  -> Maybe NS.HostName            -- ^Explicit Server Name Identification.
+  -> CertificateStore             -- ^CAs used to verify the server certificate.
+                                  -- Use 'getSystemCertificateStore' to obtaing
+                                  -- the operating system's defaults.
   -> ClientSettings
 clientSettings creds msni cStore =
-    ClientSettings $ T.updateClientParams modClientParams
-                         . modParamsCore
-                         $ T.defaultParamsClient
+    ClientSettings . T.updateClientParams modClientParams
+                   . modParamsCore
+                   $ T.defaultParamsClient
   where
     modParamsCore p = p
       { T.pConnectVersion      = T.TLS10
       , T.pAllowedVersions     = [T.TLS10, T.TLS11, T.TLS12]
-      , T.onCertificatesRecv   = serverCertsCheck
+      , T.onCertificatesRecv   = TE.certificateVerifyChain cStore
       , T.pCertificates        = creds
       , T.pCiphers             = TE.ciphersuite_all
       , T.pUseSession          = True }
@@ -92,13 +103,6 @@ clientSettings creds msni cStore =
     modClientParams cp = cp
       { T.onCertificateRequest = const (return creds)
       , T.clientUseServerName  = msni }
-
-    serverCertsCheck = TE.certificateChecks $ mconcat
-      [ [TE.certificateVerifyChain cStore]
-      , case msni of
-          Nothing   -> []
-          Just host -> [return . TE.certificateVerifyDomain host]
-      ]
 
 modifyClientParams :: (T.Params -> T.Params) -> ClientSettings -> ClientSettings
 modifyClientParams f = ClientSettings . f . unClientSettings
@@ -115,8 +119,6 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
 --
 -- * Cyphers: 'TE.ciphersuite_medium'
---
--- * Do not request a certificate from client.
 serverSettings
   :: X509          -- ^Server certificate.
   -> T.PrivateKey  -- ^Server private key.
@@ -125,9 +127,9 @@ serverSettings
                             -- be expected during on handshake.
   -> ServerSettings
 serverSettings cert pk mcStore =
-    ServerSettings $ T.updateServerParams modServerParams
-                         . modParamsCore
-                         $ T.defaultParamsServer
+    ServerSettings . T.updateServerParams modServerParams
+                   . modParamsCore
+                   $ T.defaultParamsServer
   where
     modParamsCore p = p
       { T.pConnectVersion      = T.TLS10
@@ -135,11 +137,9 @@ serverSettings cert pk mcStore =
       , T.pCiphers             = TE.ciphersuite_medium
       , T.pCertificates        = [(cert, Just pk)]
       , T.pUseSession          = True }
-
     modServerParams sp = sp
       { T.serverWantClientCert = maybe False (const True) mcStore
       , T.onClientCertificate  = clientCertsCheck }
-
     clientCertsCheck certs = case mcStore of
       Nothing -> return T.CertificateUsageAccept
       Just cs -> TE.certificateVerifyChain cs certs
@@ -189,8 +189,7 @@ accept
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO b
-accept ss lsock k =
-    useTlsThenClose k =<< acceptTls (unServerSettings ss) lsock
+accept ss lsock k = useTlsThenClose k =<< acceptTls ss lsock
 {-# INLINABLE accept #-}
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -204,8 +203,7 @@ acceptFork
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO ThreadId
-acceptFork ss lsock k =
-    forkIO . useTlsThenClose k =<< acceptTls (unServerSettings ss) lsock
+acceptFork ss lsock k = forkIO . useTlsThenClose k =<< acceptTls ss lsock
 {-# INLINABLE acceptFork #-}
 
 --------------------------------------------------------------------------------
@@ -227,32 +225,38 @@ connect
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connect cs host port k =
-    useTlsThenClose k =<< connectTls (unClientSettings cs) host port
+connect cs host port k = useTlsThenClose k =<< connectTls cs host port
 
 --------------------------------------------------------------------------------
 
--- | Like 'S.connectSock', except it returns a secure TLS 'T.Context' setup
--- using the given 'T.Params', instead of a 'NS.Socket'.
+-- | Like 'S.connectSock', except instead of a 'NS.Socket', it returns a secure
+-- TLS 'T.Context' configured using the given 'ClientSettings'.
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
 -- for communication purposes, and 'T.bye' afterwards.
-connectTls :: T.Params -> NS.HostName -> NS.ServiceName
+connectTls :: ClientSettings -> NS.HostName -> NS.ServiceName
            -> IO (T.Context, NS.SockAddr)
-connectTls params host port = do
+connectTls (ClientSettings params) host port = do
     (csock, caddr) <- S.connectSock host port
     h <- NS.socketToHandle csock ReadWriteMode
-    ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
+    ctx <- T.contextNewOnHandle h params' =<< getSystemRandomGen
     return (ctx, caddr)
+  where
+    params' = params { T.onCertificatesRecv = TE.certificateChecks certsCheck }
+    certsCheck = [T.onCertificatesRecv params, return . checkHost]
+    checkHost =
+      let T.Client cparams = T.roleParams params in
+      case T.clientUseServerName cparams of
+        Nothing  -> TE.certificateVerifyDomain host
+        Just sni -> TE.certificateVerifyDomain sni
 
-
--- | Like to 'NS.accept', except it returns a secure TLS 'T.Context' setup
--- using the given 'T.Params', instead of a 'NS.Socket'.
+-- | Like 'NS.accept', except instead of a 'NS.Socket', it returns a secure
+-- TLS 'T.Context' configured using the given 'ServerSettings'.
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
 -- for communication purposes, and 'T.bye' afterwards.
-acceptTls :: T.Params -> NS.Socket -> IO (T.Context, NS.SockAddr)
-acceptTls params lsock = do
+acceptTls :: ServerSettings -> NS.Socket -> IO (T.Context, NS.SockAddr)
+acceptTls (ServerSettings params) lsock = do
     (csock, caddr) <- NS.accept lsock
     h <- NS.socketToHandle csock ReadWriteMode
     ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen

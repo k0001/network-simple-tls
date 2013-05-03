@@ -104,6 +104,8 @@ clientSettings creds msni cStore =
       { T.onCertificateRequest = const (return creds)
       , T.clientUseServerName  = msni }
 
+-- | Modify advanced TLS client configuration 'T.Params'.
+-- See the "Network.TLS" module for details.
 modifyClientParams :: (T.Params -> T.Params) -> ClientSettings -> ClientSettings
 modifyClientParams f = ClientSettings . f . unClientSettings
 
@@ -145,6 +147,8 @@ serverSettings cert pk mcStore =
       Just cs -> TE.certificateVerifyChain cs certs
 
 
+-- | Modify advanced TLS server configuration 'T.Params'.
+-- See the "Network.TLS" module for details.
 modifyServerParams :: (T.Params -> T.Params) -> ServerSettings -> ServerSettings
 modifyServerParams f = ServerSettings . f . unServerSettings
 

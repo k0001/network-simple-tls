@@ -1,5 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
-
 -- | This module exports common usage patterns for establishing TLS-secured
 -- TCP connections, relevant to both the client side and server side of the
 -- connection.

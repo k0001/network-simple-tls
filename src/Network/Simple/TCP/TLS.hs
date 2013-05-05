@@ -18,6 +18,7 @@ module Network.Simple.TCP.TLS (
   , ServerSettings
   , serverSettings
   , modifyServerParams
+  , serverParams
 
   -- * Client side
   , connect
@@ -26,6 +27,7 @@ module Network.Simple.TCP.TLS (
   , clientSettings
   , getDefaultClientSettings
   , modifyClientParams
+  , clientParams
 
   -- * Low level support
   , S.bindSock
@@ -111,6 +113,12 @@ clientSettings creds msni cStore =
 modifyClientParams :: (T.Params -> T.Params) -> ClientSettings -> ClientSettings
 modifyClientParams f = ClientSettings . f . unClientSettings
 
+-- | A lens into the TLS client configuration 'T.Params'.
+-- See the "Network.TLS" and the @lens@ package for details.
+clientParams ::(Functor f) => (T.Params -> f T.Params)
+             -> (ClientSettings -> f ClientSettings)
+clientParams f = fmap ClientSettings . f . unClientSettings
+
 --------------------------------------------------------------------------------
 -- Server side TLS settings
 
@@ -156,6 +164,12 @@ serverSettings cert pk mcStore =
 -- See the "Network.TLS" module for details.
 modifyServerParams :: (T.Params -> T.Params) -> ServerSettings -> ServerSettings
 modifyServerParams f = ServerSettings . f . unServerSettings
+
+-- | A lens into the TLS server configuration 'T.Params'.
+-- See the "Network.TLS" and the @lens@ package for details.
+serverParams ::(Functor f) => (T.Params -> f T.Params)
+             -> (ServerSettings -> f ServerSettings)
+serverParams f = fmap ServerSettings . f . unServerSettings
 
 --------------------------------------------------------------------------------
 

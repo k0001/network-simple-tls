@@ -38,19 +38,18 @@ module Network.Simple.TCP.TLS (
   , S.HostPreference(..)
   ) where
 
-import           Control.Concurrent         (ThreadId, forkIO)
-import qualified Control.Exception          as E
-import           Control.Monad              (forever)
-import           Crypto.Random.API          (getSystemRandomGen)
-import           Data.Certificate.X509      (X509)
-import           Data.CertificateStore      (CertificateStore)
-import qualified GHC.IO.Exception           as Eg
-import qualified Network.Simple.TCP         as S
-import qualified Network.Socket             as NS
-import qualified Network.TLS                as T
-import           Network.TLS.Extra          as TE
-import           System.Certificate.X509    (getSystemCertificateStore)
-import           System.IO                  (IOMode(ReadWriteMode))
+import           Control.Concurrent              (ThreadId, forkIO)
+import           Control.Monad                   (forever)
+import           Crypto.Random.API               (getSystemRandomGen)
+import           Data.Certificate.X509           (X509)
+import           Data.CertificateStore           (CertificateStore)
+import qualified Network.Simple.TCP              as S
+import           Network.Simple.TCP.TLS.Internal (useTlsThenClose)
+import qualified Network.Socket                  as NS
+import qualified Network.TLS                     as T
+import           Network.TLS.Extra               as TE
+import           System.Certificate.X509         (getSystemCertificateStore)
+import           System.IO                       (IOMode(ReadWriteMode))
 
 --------------------------------------------------------------------------------
 -- Client side TLS settings
@@ -285,25 +284,3 @@ acceptTls (ServerSettings params) lsock = do
     ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
     return (ctx, caddr)
 
---------------------------------------------------------------------------------
--- Internal stuff
-
-useTlsThenClose :: ((T.Context, NS.SockAddr) -> IO a)
-                -> (T.Context, NS.SockAddr) -> IO a
-useTlsThenClose k conn@(ctx,_) =
-    E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
-              (contextClose' ctx)
-  where
-    -- If the remote end closes the connection first we might get some
-    -- exceptions. These wrappers work around those exceptions.
-    contextClose' = ignoreResourceVanishedErrors . T.contextClose
-    bye'          = ignoreResourceVanishedErrors . T.bye
-{-# INLINE useTlsThenClose #-}
-
--- | Perform the given action, swallowing any 'E.IOException' of type
--- 'Eg.ResourceVanished' if it happens.
-ignoreResourceVanishedErrors :: IO () -> IO ()
-ignoreResourceVanishedErrors = E.handle (\e -> case e of
-    Eg.IOError{} | Eg.ioe_type e == Eg.ResourceVanished -> return ()
-    _ -> E.throwIO e)
-{-# INLINE ignoreResourceVanishedErrors #-}

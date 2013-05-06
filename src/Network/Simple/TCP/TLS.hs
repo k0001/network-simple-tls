@@ -102,7 +102,6 @@ clientSettings creds msni cStore =
       , T.pCertificates        = creds
       , T.pCiphers             = TE.ciphersuite_all
       , T.pUseSession          = True }
-
     modClientParams cp = cp
       { T.onCertificateRequest = const (return creds)
       , T.clientUseServerName  = msni }

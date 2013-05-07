@@ -19,7 +19,6 @@ module Network.Simple.TCP.TLS (
   , serverSettings
   , modifyServerParams
   , serverParams
-
   -- * Client side
   , connect
   -- ** TLS Settings
@@ -28,19 +27,23 @@ module Network.Simple.TCP.TLS (
   , getDefaultClientSettings
   , modifyClientParams
   , clientParams
-
   -- * Low level support
   , S.bindSock
   , connectTls
   , acceptTls
-
+  -- * Utils
+  , recv
+  , send
   -- * Exports
   , S.HostPreference(..)
   ) where
 
 import           Control.Concurrent              (ThreadId, forkIO)
+import qualified Control.Exception               as E
 import           Control.Monad                   (forever)
 import           Crypto.Random.API               (getSystemRandomGen)
+import qualified Data.ByteString                 as B
+import qualified Data.ByteString.Lazy            as BL
 import           Data.Certificate.X509           (X509)
 import           Data.CertificateStore           (CertificateStore)
 import qualified Network.Simple.TCP              as S
@@ -283,3 +286,23 @@ acceptTls (ServerSettings params) lsock = do
     ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
     return (ctx, caddr)
 
+
+--------------------------------------------------------------------------------
+-- Utils
+
+-- | Receives up to a limited number of bytes from the given 'T.Context'.
+-- Returns 'Nothing' on EOF.
+recv :: T.Context -> Int -> IO (Maybe B.ByteString)
+recv ctx nbytes = do
+    ebs <- E.try (T.backendRecv (T.ctxConnection ctx) nbytes)
+    case ebs of
+      Left T.Error_EOF     -> return Nothing
+      Left e               -> E.throwIO e
+      Right bs | B.null bs -> return Nothing
+               | otherwise -> return (Just bs)
+{-# INLINABLE recv #-}
+
+-- Sends the given strict 'B.ByteString' through the 'T.Context'.
+send :: T.Context -> B.ByteString -> IO ()
+send ctx = T.sendData ctx . BL.fromChunks . (:[])
+{-# INLINABLE send #-}

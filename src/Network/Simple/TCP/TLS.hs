@@ -46,9 +46,10 @@ import           Control.Monad                   (forever)
 import           Crypto.Random.API               (getSystemRandomGen)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
-import           Data.List                       (intersect)
 import           Data.Certificate.X509           (X509)
 import           Data.CertificateStore           (CertificateStore)
+import           Data.List                       (intersect)
+import           Data.Maybe                      (maybeToList)
 import qualified GHC.IO.Exception           as Eg
 import qualified Network.Simple.TCP              as S
 import qualified Network.Socket                  as NS
@@ -72,7 +73,7 @@ data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 -- See 'makeClientSettings' for the for the default TLS settings used.
 getDefaultClientSettings :: IO ClientSettings
 getDefaultClientSettings =
-    makeClientSettings [] Nothing `fmap` getSystemCertificateStore
+    makeClientSettings Nothing Nothing `fmap` getSystemCertificateStore
 
 -- | Make defaults 'ClientSettings'.
 --
@@ -86,13 +87,13 @@ getDefaultClientSettings =
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 makeClientSettings
-  :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
+  :: Maybe (X509, T.PrivateKey)   -- ^Client certificate and private key.
   -> Maybe NS.HostName            -- ^Explicit Server Name Identification.
   -> CertificateStore             -- ^CAs used to verify the server certificate.
                                   -- Use 'getSystemCertificateStore' to obtaing
                                   -- the operating system's defaults.
   -> ClientSettings
-makeClientSettings creds msni cStore =
+makeClientSettings mcreds msni cStore =
     ClientSettings . T.updateClientParams modClientParams
                    . modParamsCore
                    $ T.defaultParamsClient
@@ -107,6 +108,7 @@ makeClientSettings creds msni cStore =
     modClientParams cp = cp
       { T.onCertificateRequest = const (return creds)
       , T.clientUseServerName  = msni }
+    creds = fmap Just `fmap` maybeToList mcreds
 
 -- | Modify advanced TLS client configuration 'T.Params'.
 -- See the "Network.TLS" module for details.

@@ -9,7 +9,6 @@ import qualified Data.ByteString.Lazy.Char8 as BL ()
 import           Data.Certificate.X509      (X509)
 import           Data.CertificateStore      (CertificateStore
                                             ,makeCertificateStore)
-import           Data.Maybe                 (maybeToList)
 import           Data.Monoid                ((<>))
 import qualified Network.Simple.TCP.TLS     as Z
 import qualified Network.Socket             as NS
@@ -19,7 +18,7 @@ import           System.Certificate.X509    (getSystemCertificateStore)
 import           System.Console.GetOpt
 import           System.Environment         (getProgName, getArgs)
 
-client :: CertificateStore -> [(X509, Maybe T.PrivateKey)] -> NS.HostName
+client :: CertificateStore -> Maybe (X509, T.PrivateKey) -> NS.HostName
        -> NS.ServiceName -> IO ()
 client cStore creds host port = do
     Z.connect csettings host port $ \(ctx,_) -> do
@@ -49,8 +48,8 @@ main = do
         cStore <- case optCACert opts of
           Nothing -> getSystemCertificateStore
           Just ca -> return $ makeCertificateStore [ca]
-        let cpk = (,) <$> optClientCert opts <*> Just (optClientKey opts)
-        client cStore (maybeToList cpk) hostname port
+        let cpk = (,) <$> optClientCert opts <*> optClientKey opts
+        client cStore cpk hostname port
       (_,_,msgs) -> do
         pn <- getProgName
         let header = "Usage: " <> pn <> " [OPTIONS] HOSTNAME PORT"

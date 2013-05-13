@@ -31,6 +31,7 @@ module Network.Simple.TCP.TLS (
   , S.bindSock
   , connectTls
   , acceptTls
+  , useTls
   -- * Utils
   , recv
   , send
@@ -46,8 +47,8 @@ import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
 import           Data.Certificate.X509           (X509)
 import           Data.CertificateStore           (CertificateStore)
+import qualified GHC.IO.Exception           as Eg
 import qualified Network.Simple.TCP              as S
-import           Network.Simple.TCP.TLS.Internal (useTlsThenClose)
 import qualified Network.Socket                  as NS
 import qualified Network.TLS                     as T
 import           Network.TLS.Extra               as TE
@@ -213,7 +214,7 @@ accept
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO b
-accept ss lsock k = useTlsThenClose k =<< acceptTls ss lsock
+accept ss lsock k = useTls k =<< acceptTls ss lsock
 {-# INLINABLE accept #-}
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -227,7 +228,7 @@ acceptFork
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO ThreadId
-acceptFork ss lsock k = forkIO . useTlsThenClose k =<< acceptTls ss lsock
+acceptFork ss lsock k = forkIO . useTls k =<< acceptTls ss lsock
 {-# INLINABLE acceptFork #-}
 
 --------------------------------------------------------------------------------
@@ -249,7 +250,7 @@ connect
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connect cs host port k = useTlsThenClose k =<< connectTls cs host port
+connect cs host port k = useTls k =<< connectTls cs host port
 
 --------------------------------------------------------------------------------
 
@@ -286,6 +287,20 @@ acceptTls (ServerSettings params) lsock = do
     ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
     return (ctx, caddr)
 
+-- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the
+-- given action, and at last close say 'T.bye' and close the TLS connection,
+-- even in case of exceptions.
+useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
+useTls k conn@(ctx,_) =
+    E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
+              (contextClose' ctx)
+  where
+    -- If the remote end closes the connection first we might get some
+    -- exceptions. These wrappers work around those exceptions.
+    contextClose' = ignoreResourceVanishedErrors . T.contextClose
+    bye'          = ignoreResourceVanishedErrors . T.bye
+{-# INLINE useTls #-}
+
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -306,3 +321,15 @@ recv ctx nbytes = do
 send :: T.Context -> B.ByteString -> IO ()
 send ctx = T.sendData ctx . BL.fromChunks . (:[])
 {-# INLINABLE send #-}
+
+
+--------------------------------------------------------------------------------
+-- Internal stuff
+
+-- | Perform the given action, swallowing any 'E.IOException' of type
+-- 'Eg.ResourceVanished' if it happens.
+ignoreResourceVanishedErrors :: IO () -> IO ()
+ignoreResourceVanishedErrors = E.handle (\e -> case e of
+    Eg.IOError{} | Eg.ioe_type e == Eg.ResourceVanished -> return ()
+    _ -> E.throwIO e)
+{-# INLINE ignoreResourceVanishedErrors #-}

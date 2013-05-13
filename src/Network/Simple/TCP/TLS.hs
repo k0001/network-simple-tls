@@ -299,7 +299,6 @@ useTls k conn@(ctx,_) =
     -- exceptions. These wrappers work around those exceptions.
     contextClose' = ignoreResourceVanishedErrors . T.contextClose
     bye'          = ignoreResourceVanishedErrors . T.bye
-{-# INLINE useTls #-}
 
 
 --------------------------------------------------------------------------------

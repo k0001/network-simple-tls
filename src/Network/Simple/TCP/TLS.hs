@@ -7,8 +7,6 @@
 -- need a similar API without TLS support.
 
 module Network.Simple.TCP.TLS (
-  -- * Default TLS settings
-  -- $default-tls-settings
 
   -- * Server side
     serve
@@ -70,12 +68,24 @@ import           System.IO                       (IOMode(ReadWriteMode))
 data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 
 -- | Get the system default 'ClientSettings'.
+--
+-- See 'clientSettings' for the for the default TLS settings used.
 getDefaultClientSettings :: IO ClientSettings
 getDefaultClientSettings =
     clientSettings [] Nothing `fmap` getSystemCertificateStore
 
-
 -- | Make defaults 'ClientSettings'.
+--
+-- The following TLS settings are used by default:
+--
+-- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
+--
+-- [Version reported during /ClientHello/] 'T.TLS10'.
+--
+-- [Supported ciphers] In descending order of preference:
+-- 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
+-- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
+-- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 clientSettings
   :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
   -> Maybe NS.HostName            -- ^Explicit Server Name Identification.
@@ -120,6 +130,17 @@ clientParams f = fmap ClientSettings . f . unClientSettings
 data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 
 -- | Make default 'ServerSettings'.
+--
+-- The following TLS settings are used by default:
+--
+-- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
+--
+-- [Ciphers supported with 'T.TLS10'] In descending order of preference:
+-- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
+--
+-- [Ciphers supporeted with 'T.TLS11' and 'T.TLS12'] In descending order of
+-- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
+-- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
 serverSettings
   :: X509          -- ^Server certificate.
   -> T.PrivateKey  -- ^Server private key.
@@ -329,19 +350,7 @@ ignoreResourceVanishedErrors = E.handle (\e -> case e of
 {-# INLINE ignoreResourceVanishedErrors #-}
 
 
---------------------------------------------------------------------------------
--- $default-tls-settings
---
--- The following TLS settings are used by default throughout this module.
---
--- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
---
--- [Ciphers used with 'T.TLS10'] In descending order of preference:
--- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
---
--- [Ciphers used with 'T.TLS11' and 'T.TLS12'] In descending order of
--- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
--- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
+----------------------------------------------------------------------------------
 
 defaultVersions :: [T.Version]
 defaultVersions = [T.TLS12, T.TLS11, T.TLS10]

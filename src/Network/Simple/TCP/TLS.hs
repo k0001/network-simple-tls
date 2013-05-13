@@ -82,8 +82,7 @@ getDefaultClientSettings =
 --
 -- [Version reported during /ClientHello/] 'T.TLS10'.
 --
--- [Supported ciphers] In descending order of preference:
--- 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
+-- [Supported ciphers] 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 clientSettings

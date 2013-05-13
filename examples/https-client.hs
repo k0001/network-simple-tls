@@ -26,7 +26,7 @@ client cStore creds host port = do
        T.sendData ctx "GET / HTTP/1.0\r\n\r\n"
        consume ctx B.putStr >> putStrLn ""
   where
-    csettings = Z.clientSettings creds (Just host) cStore
+    csettings = Z.makeClientSettings creds (Just host) cStore
 
 -- | Repeatedly receive data from the given 'T.Context' until exhausted,
 -- performing the given action on each received chunk.

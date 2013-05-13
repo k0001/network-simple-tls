@@ -3,6 +3,7 @@
 
 module Main (main) where
 
+import           Control.Applicative
 import qualified Control.Exception          as E
 import qualified Data.ByteString.Char8      as B
 import qualified Data.ByteString.Lazy.Char8 as BL
@@ -15,10 +16,12 @@ import qualified Network.TLS                as T
 import           Network.TLS.Extra          as TE
 import           System.Console.GetOpt
 import           System.Environment         (getProgName, getArgs)
+import qualified Data.CertificateStore      as C
 
-server :: X509 -> T.PrivateKey -> Z.HostPreference -> NS.ServiceName -> IO ()
-server cert pk hp port = do
-    let ss = Z.serverSettings cert pk Nothing
+server :: X509 -> T.PrivateKey -> Z.HostPreference -> NS.ServiceName
+       -> Maybe C.CertificateStore -> IO ()
+server cert pk hp port mcs = do
+    let ss = Z.makeServerSettings cert pk mcs
     Z.serve ss hp port $ \(ctx,caddr) -> do
        putStrLn $ show caddr <> " joined."
        consume ctx $ \bs -> do
@@ -45,6 +48,7 @@ main = do
       (actions, [hostname,port], _) -> do
         opts <- foldl (>>=) (return defaultOptions) actions
         server (optServerCert opts) (optServerKey opts) (Z.Host hostname) port
+               (C.makeCertificateStore . pure <$> optCACert opts)
       (_,_,msgs) -> do
         pn <- getProgName
         let header = "Usage: " <> pn <> " [OPTIONS] HOSTNAME PORT"
@@ -56,18 +60,22 @@ main = do
 data Options = Options
   { optServerCert :: X509
   , optServerKey  :: T.PrivateKey
+  , optCACert     :: Maybe X509
   } deriving (Show)
 
 defaultOptions :: Options
 defaultOptions = Options
   { optServerCert = error "Missing optServerCert"
   , optServerKey  = error "Missing optServerKey"
+  , optCACert     = Nothing
   }
 
 options :: [OptDescr (Options -> IO Options)]
 options =
   [ Option [] ["cert"]   (ReqArg readServerCert "FILE") "Server certificate"
   , Option [] ["key"]    (ReqArg readServerKey  "FILE") "Server private key"
+  , Option [] ["cacert"] (OptArg readCACert     "FILE")
+    "CA certificate to verify a client certificate, if given"
   ]
 
 readServerCert :: FilePath -> Options -> IO Options
@@ -79,4 +87,10 @@ readServerKey :: FilePath -> Options -> IO Options
 readServerKey arg opt = do
     key <- TE.fileReadPrivateKey arg
     return $ opt { optServerKey = key }
+
+readCACert :: Maybe FilePath -> Options -> IO Options
+readCACert Nothing    opt = return opt
+readCACert (Just arg) opt = do
+    cert <- TE.fileReadCertificate arg
+    return $ opt { optCACert = Just cert }
 

@@ -7,6 +7,9 @@
 -- need a similar API without TLS support.
 
 module Network.Simple.TCP.TLS (
+  -- * Default TLS settings
+  -- $default-tls-settings
+
   -- * Server side
     serve
   -- ** Listening
@@ -14,14 +17,14 @@ module Network.Simple.TCP.TLS (
   -- ** Accepting
   , accept
   , acceptFork
-  -- ** TLS Settings
+  -- ** Server TLS Settings
   , ServerSettings
   , serverSettings
   , modifyServerParams
   , serverParams
   -- * Client side
   , connect
-  -- ** TLS Settings
+  -- ** Client TLS Settings
   , ClientSettings
   , clientSettings
   , getDefaultClientSettings
@@ -45,6 +48,7 @@ import           Control.Monad                   (forever)
 import           Crypto.Random.API               (getSystemRandomGen)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
+import           Data.List                       (intersect)
 import           Data.Certificate.X509           (X509)
 import           Data.CertificateStore           (CertificateStore)
 import qualified GHC.IO.Exception           as Eg
@@ -55,38 +59,23 @@ import           Network.TLS.Extra               as TE
 import           System.Certificate.X509         (getSystemCertificateStore)
 import           System.IO                       (IOMode(ReadWriteMode))
 
+
 --------------------------------------------------------------------------------
 -- Client side TLS settings
 
 -- | Opaque type representing the configuration settings for a TLS client.
 --
 -- Use 'clientSettings' or 'getDefaultClientSettings' to obtain your
--- 'ClientSettings' value.
+-- 'ClientSettings' value, and 'modifyClientParams' to modify it.
 data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 
--- | Get the default system 'ClientSettings'.
---
--- Use 'modifyClientParams' to modify the TLS 'T.Params'.
---
--- Default TLS connection settings:
---
--- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
---
--- * Cyphers: 'TE.ciphersuite_all'
+-- | Get the system default 'ClientSettings'.
 getDefaultClientSettings :: IO ClientSettings
 getDefaultClientSettings =
     clientSettings [] Nothing `fmap` getSystemCertificateStore
 
 
--- | Make basic 'ClientSettings'.
---
--- Use 'modifyClientParams' to modify the TLS 'T.Params'.
---
--- Default TLS connection settings:
---
--- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
---
--- * Cyphers: 'TE.ciphersuite_all'
+-- | Make defaults 'ClientSettings'.
 clientSettings
   :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
   -> Maybe NS.HostName            -- ^Explicit Server Name Identification.
@@ -100,12 +89,12 @@ clientSettings creds msni cStore =
                    $ T.defaultParamsClient
   where
     modParamsCore p = p
-      { T.pConnectVersion      = T.TLS10
-      , T.pAllowedVersions     = [T.TLS10, T.TLS11, T.TLS12]
-      , T.onCertificatesRecv   = TE.certificateVerifyChain cStore
+      { T.pConnectVersion      = defaultConnectVersion
+      , T.pAllowedVersions     = defaultVersions
+      , T.pCiphers             = defaultCiphers
+      , T.pUseSession          = True
       , T.pCertificates        = creds
-      , T.pCiphers             = TE.ciphersuite_all
-      , T.pUseSession          = True }
+      , T.onCertificatesRecv   = TE.certificateVerifyChain cStore }
     modClientParams cp = cp
       { T.onCertificateRequest = const (return creds)
       , T.clientUseServerName  = msni }
@@ -126,16 +115,11 @@ clientParams f = fmap ClientSettings . f . unClientSettings
 
 -- | Opaque type representing the configuration settings for a TLS server.
 --
--- Use 'serverSettings' to obtain your 'ServerSettings' value.
+-- Use 'serverSettings' to obtain your 'ServerSettings' value, and
+-- 'modifyServerParams' to modify it.
 data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 
--- | Make basic 'ServerSettings'.
---
--- Default TLS connection settings:
---
--- * Versions: 'T.TLS10', 'T.TLS11', 'T.TLS12'
---
--- * Cyphers: 'TE.ciphersuite_medium'
+-- | Make default 'ServerSettings'.
 serverSettings
   :: X509          -- ^Server certificate.
   -> T.PrivateKey  -- ^Server private key.
@@ -149,17 +133,19 @@ serverSettings cert pk mcStore =
                    $ T.defaultParamsServer
   where
     modParamsCore p = p
-      { T.pConnectVersion      = T.TLS10
-      , T.pAllowedVersions     = [T.TLS10, T.TLS11, T.TLS12]
-      , T.pCiphers             = TE.ciphersuite_medium
-      , T.pCertificates        = [(cert, Just pk)]
-      , T.pUseSession          = True }
+      { T.pConnectVersion      = defaultConnectVersion
+      , T.pAllowedVersions     = defaultVersions
+      , T.pCiphers             = defaultCiphers
+      , T.pUseSession          = True
+      , T.pCertificates        = [(cert, Just pk)] }
     modServerParams sp = sp
       { T.serverWantClientCert = maybe False (const True) mcStore
-      , T.onClientCertificate  = clientCertsCheck }
+      , T.onClientCertificate  = clientCertsCheck
+      , T.onCipherChoosing     = chooseCipher }
     clientCertsCheck certs = case mcStore of
       Nothing -> return T.CertificateUsageAccept
       Just cs -> TE.certificateVerifyChain cs certs
+    chooseCipher ver xs = head (intersect (safeCiphers ver) xs)
 
 
 -- | Modify advanced TLS server configuration 'T.Params'.
@@ -257,8 +243,12 @@ connect cs host port k = useTls k =<< connectTls cs host port
 -- | Like 'S.connectSock', except instead of a 'NS.Socket', it returns a secure
 -- TLS 'T.Context' configured using the given 'ClientSettings'.
 --
+-- Prefer to use 'connect' if you will be used the obtained 'T.Context' within a
+-- limited scope.
+--
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
--- for communication purposes, and 'T.bye' afterwards.
+-- for communication purposes, and 'T.bye' afterwards. The 'useTls' function
+-- can perform those steps for you.
 connectTls :: ClientSettings -> NS.HostName -> NS.ServiceName
            -> IO (T.Context, NS.SockAddr)
 connectTls (ClientSettings params) host port = do
@@ -278,8 +268,12 @@ connectTls (ClientSettings params) host port = do
 -- | Like 'NS.accept', except instead of a 'NS.Socket', it returns a secure
 -- TLS 'T.Context' configured using the given 'ServerSettings'.
 --
+-- Prefer to use 'accept' if you will be used the obtained 'T.Context' within a
+-- limited scope.
+--
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
--- for communication purposes, and 'T.bye' afterwards.
+-- for communication purposes, and 'T.bye' afterwards. The 'useTls' function
+-- can perform those steps for you.
 acceptTls :: ServerSettings -> NS.Socket -> IO (T.Context, NS.SockAddr)
 acceptTls (ServerSettings params) lsock = do
     (csock, caddr) <- NS.accept lsock
@@ -288,8 +282,8 @@ acceptTls (ServerSettings params) lsock = do
     return (ctx, caddr)
 
 -- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the
--- given action, and at last close say 'T.bye' and close the TLS connection,
--- even in case of exceptions.
+-- given action, and at last say 'T.bye' and close the TLS connection, even in
+-- case of exceptions.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
 useTls k conn@(ctx,_) =
     E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
@@ -325,6 +319,7 @@ send ctx = T.sendData ctx . BL.fromChunks . (:[])
 --------------------------------------------------------------------------------
 -- Internal stuff
 
+
 -- | Perform the given action, swallowing any 'E.IOException' of type
 -- 'Eg.ResourceVanished' if it happens.
 ignoreResourceVanishedErrors :: IO () -> IO ()
@@ -332,3 +327,47 @@ ignoreResourceVanishedErrors = E.handle (\e -> case e of
     Eg.IOError{} | Eg.ioe_type e == Eg.ResourceVanished -> return ()
     _ -> E.throwIO e)
 {-# INLINE ignoreResourceVanishedErrors #-}
+
+
+--------------------------------------------------------------------------------
+-- $default-tls-settings
+--
+-- The following TLS settings are used by default throughout this module.
+--
+-- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
+--
+-- [Cyphers used with 'T.TLS10'] In descending order of preference:
+-- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
+--
+-- [Ciphers used with 'T.TLS11' and 'T.TLS12'] In descending order of
+-- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
+-- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
+
+defaultVersions :: [T.Version]
+defaultVersions = [T.TLS12, T.TLS11, T.TLS10]
+
+defaultConnectVersion :: T.Version
+defaultConnectVersion = T.TLS10
+
+defaultCiphers :: [T.Cipher]
+defaultCiphers = aesCiphers ++ rc4Ciphers
+
+rc4Ciphers :: [T.Cipher]
+rc4Ciphers = [ TE.cipher_RC4_128_SHA1
+             , TE.cipher_RC4_128_MD5 ]
+
+aesCiphers :: [T.Cipher]
+aesCiphers = [ TE.cipher_AES256_SHA256
+             , TE.cipher_AES256_SHA1
+             , TE.cipher_AES128_SHA256
+             , TE.cipher_AES128_SHA1 ]
+
+safeCiphers :: T.Version -> [T.Cipher]
+safeCiphers T.TLS10 = rc4Ciphers
+safeCiphers T.TLS11 = aesCiphers
+safeCiphers T.TLS12 = aesCiphers
+safeCiphers T.SSL3  = rc4Ciphers
+safeCiphers v       = error ("safeCiphers: Version not supported: " ++ show v)
+{-# INLINABLE safeCiphers #-}
+
+

@@ -310,7 +310,7 @@ recv ctx nbytes = do
                | otherwise -> return (Just bs)
 {-# INLINABLE recv #-}
 
--- Sends the given strict 'B.ByteString' through the 'T.Context'.
+-- | Sends the given strict 'B.ByteString' through the 'T.Context'.
 send :: T.Context -> B.ByteString -> IO ()
 send ctx = T.sendData ctx . BL.fromChunks . (:[])
 {-# INLINABLE send #-}
@@ -336,7 +336,7 @@ ignoreResourceVanishedErrors = E.handle (\e -> case e of
 --
 -- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
 --
--- [Cyphers used with 'T.TLS10'] In descending order of preference:
+-- [Ciphers used with 'T.TLS10'] In descending order of preference:
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 --
 -- [Ciphers used with 'T.TLS11' and 'T.TLS12'] In descending order of

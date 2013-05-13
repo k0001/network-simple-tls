@@ -17,14 +17,14 @@ module Network.Simple.TCP.TLS (
   , acceptFork
   -- ** Server TLS Settings
   , ServerSettings
-  , serverSettings
+  , makeServerSettings
   , modifyServerParams
   , serverParams
   -- * Client side
   , connect
   -- ** Client TLS Settings
   , ClientSettings
-  , clientSettings
+  , makeClientSettings
   , getDefaultClientSettings
   , modifyClientParams
   , clientParams
@@ -63,16 +63,16 @@ import           System.IO                       (IOMode(ReadWriteMode))
 
 -- | Opaque type representing the configuration settings for a TLS client.
 --
--- Use 'clientSettings' or 'getDefaultClientSettings' to obtain your
+-- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain your
 -- 'ClientSettings' value, and 'modifyClientParams' to modify it.
 data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 
 -- | Get the system default 'ClientSettings'.
 --
--- See 'clientSettings' for the for the default TLS settings used.
+-- See 'makeClientSettings' for the for the default TLS settings used.
 getDefaultClientSettings :: IO ClientSettings
 getDefaultClientSettings =
-    clientSettings [] Nothing `fmap` getSystemCertificateStore
+    makeClientSettings [] Nothing `fmap` getSystemCertificateStore
 
 -- | Make defaults 'ClientSettings'.
 --
@@ -85,14 +85,14 @@ getDefaultClientSettings =
 -- [Supported ciphers] 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
-clientSettings
+makeClientSettings
   :: [(X509, Maybe T.PrivateKey)] -- ^Client certificates and private keys.
   -> Maybe NS.HostName            -- ^Explicit Server Name Identification.
   -> CertificateStore             -- ^CAs used to verify the server certificate.
                                   -- Use 'getSystemCertificateStore' to obtaing
                                   -- the operating system's defaults.
   -> ClientSettings
-clientSettings creds msni cStore =
+makeClientSettings creds msni cStore =
     ClientSettings . T.updateClientParams modClientParams
                    . modParamsCore
                    $ T.defaultParamsClient
@@ -124,7 +124,7 @@ clientParams f = fmap ClientSettings . f . unClientSettings
 
 -- | Opaque type representing the configuration settings for a TLS server.
 --
--- Use 'serverSettings' to obtain your 'ServerSettings' value, and
+-- Use 'makeServerSettings' to obtain your 'ServerSettings' value, and
 -- 'modifyServerParams' to modify it.
 data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 
@@ -140,14 +140,14 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- [Ciphers supporeted with 'T.TLS11' and 'T.TLS12'] In descending order of
 -- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
-serverSettings
+makeServerSettings
   :: X509          -- ^Server certificate.
   -> T.PrivateKey  -- ^Server private key.
   -> Maybe CertificateStore -- ^CAs used to verify the client certificate. If
                             -- specified, then a valid client certificate will
                             -- be expected during on handshake.
   -> ServerSettings
-serverSettings cert pk mcStore =
+makeServerSettings cert pk mcStore =
     ServerSettings . T.updateServerParams modServerParams
                    . modParamsCore
                    $ T.defaultParamsServer

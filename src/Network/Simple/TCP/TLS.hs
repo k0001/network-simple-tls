@@ -7,7 +7,6 @@
 -- need a similar API without TLS support.
 
 module Network.Simple.TCP.TLS (
-
   -- * Server side
     serve
   -- ** Listening
@@ -24,19 +23,21 @@ module Network.Simple.TCP.TLS (
   , connect
   -- ** Client TLS Settings
   , ClientSettings
-  , Credentials(Credentials)
   , makeClientSettings
   , getDefaultClientSettings
   , updateClientParams
   , clientParams
+  -- * Credentials
+  , Credentials(Credentials)
+  , credentialsToCertList
+  -- * Utils
+  , recv
+  , send
   -- * Low level support
   , S.bindSock
   , connectTls
   , acceptTls
   , useTls
-  -- * Utils
-  , recv
-  , send
   -- * Exports
   , S.HostPreference(..)
   ) where
@@ -60,6 +61,17 @@ import           System.IO                       (IOMode(ReadWriteMode))
 
 
 --------------------------------------------------------------------------------
+
+-- | Primary certificate, private key and an optional certificate chain.
+data Credentials = Credentials X509 T.PrivateKey [X509]
+  deriving (Show)
+
+-- | Convert client `Credentials` to the format expected by 'T.pCertificates'.
+credentialsToCertList :: Credentials -> [(X509, Maybe T.PrivateKey)]
+credentialsToCertList (Credentials c pk xs) =
+    (c, Just pk) : fmap (\x -> (x, Nothing)) xs
+
+--------------------------------------------------------------------------------
 -- Client side TLS settings
 
 -- | Opaque type representing the configuration settings for a TLS client.
@@ -67,19 +79,6 @@ import           System.IO                       (IOMode(ReadWriteMode))
 -- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain your
 -- 'ClientSettings' value.
 data ClientSettings = ClientSettings { unClientSettings :: T.Params }
-
--- | Client credentials to provide to the TLS server, if requested.
-data Credentials
-  =  Credentials X509 T.PrivateKey [X509]
-  -- ^ Primary certificate, private key and additional certificate chain.
-  deriving (Show)
-
--- | Convert client `Credentials` to the format expected by
--- 'T.onCertificateRequest'.
-credentialsToCertList :: Credentials -> [(X509, Maybe T.PrivateKey)]
-credentialsToCertList (Credentials c pk xs) =
-    (c, Just pk) : fmap (\x -> (x, Nothing)) xs
-
 
 -- | Get the system default 'ClientSettings'.
 --
@@ -100,7 +99,7 @@ getDefaultClientSettings =
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 makeClientSettings
-  :: Maybe Credentials    -- ^Client certificate and private key.
+  :: Maybe Credentials    -- ^Credentials to provide to the server if requested.
   -> Maybe NS.HostName    -- ^Explicit Server Name Identification.
   -> CertificateStore     -- ^CAs used to verify the server certificate.
                           -- Use 'getSystemCertificateStore' to obtaing
@@ -156,12 +155,12 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
 makeServerSettings
-  :: (X509, T.PrivateKey)   -- ^Server certificate and private key.
+  :: Credentials            -- ^Server credentials.
   -> Maybe CertificateStore -- ^CAs used to verify the client certificate. If
                             -- specified, then a valid client certificate will
                             -- be expected during on handshake.
   -> ServerSettings
-makeServerSettings (cert,pk) mcStore =
+makeServerSettings creds mcStore =
     ServerSettings . T.updateServerParams modServerParams
                    . modParamsCore
                    $ T.defaultParamsServer
@@ -171,7 +170,7 @@ makeServerSettings (cert,pk) mcStore =
       , T.pAllowedVersions     = defaultVersions
       , T.pCiphers             = defaultCiphers
       , T.pUseSession          = True
-      , T.pCertificates        = [(cert, Just pk)] }
+      , T.pCertificates        = credentialsToCertList creds }
     modServerParams sp = sp
       { T.serverWantClientCert = maybe False (const True) mcStore
       , T.onClientCertificate  = clientCertsCheck

@@ -49,7 +49,7 @@ import           Crypto.Random.API               (getSystemRandomGen)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
 import           Data.Certificate.X509           (X509)
-import           Data.CertificateStore           (CertificateStore)
+import qualified Data.CertificateStore           as C
 import           Data.List                       (intersect)
 import qualified GHC.IO.Exception                as Eg
 import qualified Network.Simple.TCP              as S
@@ -101,7 +101,7 @@ getDefaultClientSettings =
 makeClientSettings
   :: Maybe Credentials    -- ^Credentials to provide to the server if requested.
   -> Maybe NS.HostName    -- ^Explicit Server Name Identification.
-  -> CertificateStore     -- ^CAs used to verify the server certificate.
+  -> C.CertificateStore   -- ^CAs used to verify the server certificate.
                           -- Use 'getSystemCertificateStore' to obtaing
                           -- the operating system's defaults.
   -> ClientSettings
@@ -155,10 +155,10 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
 makeServerSettings
-  :: Credentials            -- ^Server credentials.
-  -> Maybe CertificateStore -- ^CAs used to verify the client certificate. If
-                            -- specified, then a valid client certificate will
-                            -- be expected during on handshake.
+  :: Credentials              -- ^Server credentials.
+  -> Maybe C.CertificateStore -- ^CAs used to verify the client certificate. If
+                              -- specified, then a valid client certificate will
+                              -- be expected during on handshake.
   -> ServerSettings
 makeServerSettings creds mcStore =
     ServerSettings . T.updateServerParams modServerParams
@@ -174,7 +174,8 @@ makeServerSettings creds mcStore =
     modServerParams sp = sp
       { T.serverWantClientCert = maybe False (const True) mcStore
       , T.onClientCertificate  = clientCertsCheck
-      , T.onCipherChoosing     = chooseCipher }
+      , T.onCipherChoosing     = chooseCipher
+      , T.serverCACertificates = maybe [] C.listCertificates mcStore }
     clientCertsCheck certs = case mcStore of
       Nothing -> return T.CertificateUsageAccept
       Just cs -> TE.certificateVerifyChain cs certs

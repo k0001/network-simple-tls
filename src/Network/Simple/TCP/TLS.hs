@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 -- | This module exports common usage patterns for establishing TLS-secured
 -- TCP connections, relevant to both the client side and server side of the
 -- connection.
@@ -64,7 +66,7 @@ import           System.IO                       (IOMode(ReadWriteMode))
 --------------------------------------------------------------------------------
 
 -- | Primary certificate, private key and an optional certificate chain.
-data Credential = Credential X.X509 T.PrivateKey [X.X509]
+data Credential = Credential !X.X509 !T.PrivateKey [X.X509]
   deriving (Show)
 
 -- | Convert client `Credential` to the format expected by 'T.pCertificates'.

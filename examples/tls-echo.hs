@@ -47,7 +47,7 @@ main = do
     case getOpt RequireOrder options args of
       (actions, [hostname,port], _) -> do
         opts <- foldl (>>=) (return defaultOptions) actions
-        let cred = Z.Credential (optServerCert opts) (optServerKey opts) []
+        let !cred = Z.Credential (optServerCert opts) (optServerKey opts) []
         server cred (Z.Host hostname) port
                (C.makeCertificateStore . pure <$> optCACert opts)
       (_,_,msgs) -> do

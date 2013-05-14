@@ -18,10 +18,10 @@ import           System.Console.GetOpt
 import           System.Environment         (getProgName, getArgs)
 import qualified Data.CertificateStore      as C
 
-server :: X509 -> T.PrivateKey -> Z.HostPreference -> NS.ServiceName
+server :: (X509, T.PrivateKey) -> Z.HostPreference -> NS.ServiceName
        -> Maybe C.CertificateStore -> IO ()
-server cert pk hp port mcs = do
-    let ss = Z.makeServerSettings cert pk mcs
+server cpk hp port mcs = do
+    let ss = Z.makeServerSettings cpk mcs
     Z.serve ss hp port $ \(ctx,caddr) -> do
        putStrLn $ show caddr <> " joined."
        consume ctx $ \bs -> do
@@ -47,7 +47,7 @@ main = do
     case getOpt RequireOrder options args of
       (actions, [hostname,port], _) -> do
         opts <- foldl (>>=) (return defaultOptions) actions
-        server (optServerCert opts) (optServerKey opts) (Z.Host hostname) port
+        server (optServerCert opts, optServerKey opts) (Z.Host hostname) port
                (C.makeCertificateStore . pure <$> optCACert opts)
       (_,_,msgs) -> do
         pn <- getProgName

@@ -156,13 +156,12 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
 makeServerSettings
-  :: X509          -- ^Server certificate.
-  -> T.PrivateKey  -- ^Server private key.
+  :: (X509, T.PrivateKey)   -- ^Server certificate and private key.
   -> Maybe CertificateStore -- ^CAs used to verify the client certificate. If
                             -- specified, then a valid client certificate will
                             -- be expected during on handshake.
   -> ServerSettings
-makeServerSettings cert pk mcStore =
+makeServerSettings (cert,pk) mcStore =
     ServerSettings . T.updateServerParams modServerParams
                    . modParamsCore
                    $ T.defaultParamsServer

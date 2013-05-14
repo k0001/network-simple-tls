@@ -18,14 +18,14 @@ import           System.Certificate.X509    (getSystemCertificateStore)
 import           System.Console.GetOpt
 import           System.Environment         (getProgName, getArgs)
 
-client :: CertificateStore -> Maybe Z.Credentials -> NS.HostName
+client :: CertificateStore -> Maybe Z.Credential -> NS.HostName
        -> NS.ServiceName -> IO ()
-client cStore creds host port = do
+client cStore cred host port = do
     Z.connect csettings host port $ \(ctx,_) -> do
        T.sendData ctx "GET / HTTP/1.0\r\n\r\n"
        consume ctx B.putStr >> putStrLn ""
   where
-    csettings = Z.makeClientSettings creds (Just host) cStore
+    csettings = Z.makeClientSettings cred (Just host) cStore
 
 -- | Repeatedly receive data from the given 'T.Context' until exhausted,
 -- performing the given action on each received chunk.
@@ -48,10 +48,10 @@ main = do
         cStore <- case optCACert opts of
           Nothing -> getSystemCertificateStore
           Just ca -> return $ makeCertificateStore [ca]
-        let creds = Z.Credentials <$> optClientCert opts
-                                  <*> optClientKey opts
-                                  <*> pure []
-        client cStore creds hostname port
+        let cred = Z.Credential <$> optClientCert opts
+                                <*> optClientKey opts
+                                <*> pure []
+        client cStore cred hostname port
       (_,_,msgs) -> do
         pn <- getProgName
         let header = "Usage: " <> pn <> " [OPTIONS] HOSTNAME PORT"

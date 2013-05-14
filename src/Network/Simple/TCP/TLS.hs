@@ -28,8 +28,8 @@ module Network.Simple.TCP.TLS (
   , updateClientParams
   , clientParams
   -- * Credentials
-  , Credentials(Credentials)
-  , credentialsToCertList
+  , Credential(Credential)
+  , credentialToCertList
   -- * Utils
   , recv
   , send
@@ -63,12 +63,12 @@ import           System.IO                       (IOMode(ReadWriteMode))
 --------------------------------------------------------------------------------
 
 -- | Primary certificate, private key and an optional certificate chain.
-data Credentials = Credentials X509 T.PrivateKey [X509]
+data Credential = Credential X509 T.PrivateKey [X509]
   deriving (Show)
 
--- | Convert client `Credentials` to the format expected by 'T.pCertificates'.
-credentialsToCertList :: Credentials -> [(X509, Maybe T.PrivateKey)]
-credentialsToCertList (Credentials c pk xs) =
+-- | Convert client `Credential` to the format expected by 'T.pCertificates'.
+credentialToCertList :: Credential -> [(X509, Maybe T.PrivateKey)]
+credentialToCertList (Credential c pk xs) =
     (c, Just pk) : fmap (\x -> (x, Nothing)) xs
 
 --------------------------------------------------------------------------------
@@ -99,7 +99,7 @@ getDefaultClientSettings =
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 makeClientSettings
-  :: Maybe Credentials    -- ^Credentials to provide to the server if requested.
+  :: Maybe Credential     -- ^Credential to provide to the server if requested.
   -> Maybe NS.HostName    -- ^Explicit Server Name Identification.
   -> C.CertificateStore   -- ^CAs used to verify the server certificate.
                           -- Use 'getSystemCertificateStore' to obtaing
@@ -120,7 +120,7 @@ makeClientSettings mcreds msni cStore =
     modClientParams cp = cp
       { T.onCertificateRequest = const (return certs)
       , T.clientUseServerName  = msni }
-    certs = maybe [] credentialsToCertList mcreds
+    certs = maybe [] credentialToCertList mcreds
 
 -- | Update advanced TLS client configuration 'T.Params'.
 -- See the "Network.TLS" module for details.
@@ -155,7 +155,7 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
 makeServerSettings
-  :: Credentials              -- ^Server credentials.
+  :: Credential               -- ^Server credential.
   -> Maybe C.CertificateStore -- ^CAs used to verify the client certificate. If
                               -- specified, then a valid client certificate will
                               -- be expected during on handshake.
@@ -170,7 +170,7 @@ makeServerSettings creds mcStore =
       , T.pAllowedVersions     = defaultVersions
       , T.pCiphers             = defaultCiphers
       , T.pUseSession          = True
-      , T.pCertificates        = credentialsToCertList creds }
+      , T.pCertificates        = credentialToCertList creds }
     modServerParams sp = sp
       { T.serverWantClientCert = maybe False (const True) mcStore
       , T.onClientCertificate  = clientCertsCheck

@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import           Control.Applicative        ((<$>), (<*>))
+import           Control.Applicative        ((<$>), (<*>), pure)
 import qualified Control.Exception          as E
 import qualified Data.ByteString.Char8      as B
 import qualified Data.ByteString.Lazy.Char8 as BL ()
@@ -18,7 +18,7 @@ import           System.Certificate.X509    (getSystemCertificateStore)
 import           System.Console.GetOpt
 import           System.Environment         (getProgName, getArgs)
 
-client :: CertificateStore -> Maybe (X509, T.PrivateKey) -> NS.HostName
+client :: CertificateStore -> Maybe Z.Credentials -> NS.HostName
        -> NS.ServiceName -> IO ()
 client cStore creds host port = do
     Z.connect csettings host port $ \(ctx,_) -> do
@@ -48,7 +48,9 @@ main = do
         cStore <- case optCACert opts of
           Nothing -> getSystemCertificateStore
           Just ca -> return $ makeCertificateStore [ca]
-        let cpk = (,) <$> optClientCert opts <*> optClientKey opts
+        let cpk = Z.Credentials <$> optClientCert opts
+                                <*> optClientKey opts
+                                <*> pure []
         client cStore cpk hostname port
       (_,_,msgs) -> do
         pn <- getProgName

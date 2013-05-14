@@ -18,15 +18,16 @@ module Network.Simple.TCP.TLS (
   -- ** Server TLS Settings
   , ServerSettings
   , makeServerSettings
-  , modifyServerParams
+  , updateServerParams
   , serverParams
   -- * Client side
   , connect
   -- ** Client TLS Settings
   , ClientSettings
+  , Credentials(Credentials)
   , makeClientSettings
   , getDefaultClientSettings
-  , modifyClientParams
+  , updateClientParams
   , clientParams
   -- * Low level support
   , S.bindSock
@@ -49,8 +50,7 @@ import qualified Data.ByteString.Lazy            as BL
 import           Data.Certificate.X509           (X509)
 import           Data.CertificateStore           (CertificateStore)
 import           Data.List                       (intersect)
-import           Data.Maybe                      (maybeToList)
-import qualified GHC.IO.Exception           as Eg
+import qualified GHC.IO.Exception                as Eg
 import qualified Network.Simple.TCP              as S
 import qualified Network.Socket                  as NS
 import qualified Network.TLS                     as T
@@ -65,8 +65,23 @@ import           System.IO                       (IOMode(ReadWriteMode))
 -- | Opaque type representing the configuration settings for a TLS client.
 --
 -- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain your
--- 'ClientSettings' value, and 'modifyClientParams' to modify it.
+-- 'ClientSettings' value.
 data ClientSettings = ClientSettings { unClientSettings :: T.Params }
+
+-- | Client credentials to provide to the TLS server, if requested.
+data Credentials
+  = Credentials
+      X509         -- ^Primary certificate
+      T.PrivateKey -- ^Private key
+      [X509]       -- ^Additional certificates
+  deriving (Show)
+
+-- | Convert client `Credentials` to the format expected by
+-- 'T.onCertificateRequest'.
+credentialsToCertList :: Credentials -> [(X509, Maybe T.PrivateKey)]
+credentialsToCertList (Credentials c pk xs) =
+    (c, Just pk) : fmap (\x -> (x, Nothing)) xs
+
 
 -- | Get the system default 'ClientSettings'.
 --
@@ -87,11 +102,11 @@ getDefaultClientSettings =
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 makeClientSettings
-  :: Maybe (X509, T.PrivateKey)   -- ^Client certificate and private key.
-  -> Maybe NS.HostName            -- ^Explicit Server Name Identification.
-  -> CertificateStore             -- ^CAs used to verify the server certificate.
-                                  -- Use 'getSystemCertificateStore' to obtaing
-                                  -- the operating system's defaults.
+  :: Maybe Credentials    -- ^Client certificate and private key.
+  -> Maybe NS.HostName    -- ^Explicit Server Name Identification.
+  -> CertificateStore     -- ^CAs used to verify the server certificate.
+                          -- Use 'getSystemCertificateStore' to obtaing
+                          -- the operating system's defaults.
   -> ClientSettings
 makeClientSettings mcreds msni cStore =
     ClientSettings . T.updateClientParams modClientParams
@@ -103,21 +118,21 @@ makeClientSettings mcreds msni cStore =
       , T.pAllowedVersions     = defaultVersions
       , T.pCiphers             = defaultCiphers
       , T.pUseSession          = True
-      , T.pCertificates        = creds
+      , T.pCertificates        = []
       , T.onCertificatesRecv   = TE.certificateVerifyChain cStore }
     modClientParams cp = cp
-      { T.onCertificateRequest = const (return creds)
+      { T.onCertificateRequest = const (return certs)
       , T.clientUseServerName  = msni }
-    creds = fmap Just `fmap` maybeToList mcreds
+    certs = maybe [] credentialsToCertList mcreds
 
--- | Modify advanced TLS client configuration 'T.Params'.
+-- | Update advanced TLS client configuration 'T.Params'.
 -- See the "Network.TLS" module for details.
-modifyClientParams :: (T.Params -> T.Params) -> ClientSettings -> ClientSettings
-modifyClientParams f = ClientSettings . f . unClientSettings
+updateClientParams :: (T.Params -> T.Params) -> ClientSettings -> ClientSettings
+updateClientParams f = ClientSettings . f . unClientSettings
 
--- | A lens into the TLS client configuration 'T.Params'.
+-- | A 'Control.Lens.Lens' into the TLS client configuration 'T.Params'.
 -- See the "Network.TLS" and the @lens@ package for details.
-clientParams ::(Functor f) => (T.Params -> f T.Params)
+clientParams :: Functor f => (T.Params -> f T.Params)
              -> (ClientSettings -> f ClientSettings)
 clientParams f = fmap ClientSettings . f . unClientSettings
 
@@ -127,7 +142,7 @@ clientParams f = fmap ClientSettings . f . unClientSettings
 -- | Opaque type representing the configuration settings for a TLS server.
 --
 -- Use 'makeServerSettings' to obtain your 'ServerSettings' value, and
--- 'modifyServerParams' to modify it.
+-- 'updateServerParams' to update it.
 data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 
 -- | Make default 'ServerSettings'.
@@ -170,14 +185,14 @@ makeServerSettings cert pk mcStore =
     chooseCipher ver xs = head (intersect (safeCiphers ver) xs)
 
 
--- | Modify advanced TLS server configuration 'T.Params'.
+-- | Update advanced TLS server configuration 'T.Params'.
 -- See the "Network.TLS" module for details.
-modifyServerParams :: (T.Params -> T.Params) -> ServerSettings -> ServerSettings
-modifyServerParams f = ServerSettings . f . unServerSettings
+updateServerParams :: (T.Params -> T.Params) -> ServerSettings -> ServerSettings
+updateServerParams f = ServerSettings . f . unServerSettings
 
--- | A lens into the TLS server configuration 'T.Params'.
+-- | A 'Control.Lens.Lens' into the TLS server configuration 'T.Params'.
 -- See the "Network.TLS" and the @lens@ package for details.
-serverParams ::(Functor f) => (T.Params -> f T.Params)
+serverParams :: Functor f => (T.Params -> f T.Params)
              -> (ServerSettings -> f ServerSettings)
 serverParams f = fmap ServerSettings . f . unServerSettings
 

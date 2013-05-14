@@ -65,7 +65,7 @@ import           System.IO                       (IOMode(ReadWriteMode))
 
 --------------------------------------------------------------------------------
 
--- | Primary certificate, private key and an optional certificate chain.
+-- | Primary certificate, private key and the rest of the certificate chain.
 data Credential = Credential !X.X509 !T.PrivateKey [X.X509]
   deriving (Show)
 

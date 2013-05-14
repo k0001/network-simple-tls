@@ -48,10 +48,10 @@ main = do
         cStore <- case optCACert opts of
           Nothing -> getSystemCertificateStore
           Just ca -> return $ makeCertificateStore [ca]
-        let cpk = Z.Credentials <$> optClientCert opts
-                                <*> optClientKey opts
-                                <*> pure []
-        client cStore cpk hostname port
+        let creds = Z.Credentials <$> optClientCert opts
+                                  <*> optClientKey opts
+                                  <*> pure []
+        client cStore creds hostname port
       (_,_,msgs) -> do
         pn <- getProgName
         let header = "Usage: " <> pn <> " [OPTIONS] HOSTNAME PORT"

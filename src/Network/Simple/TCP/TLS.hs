@@ -48,8 +48,9 @@ import           Control.Monad                   (forever)
 import           Crypto.Random.API               (getSystemRandomGen)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
-import           Data.Certificate.X509           (X509)
+import qualified Data.Certificate.X509           as X
 import qualified Data.CertificateStore           as C
+import           Data.Maybe                      (listToMaybe)
 import           Data.List                       (intersect)
 import qualified GHC.IO.Exception                as Eg
 import qualified Network.Simple.TCP              as S
@@ -63,11 +64,11 @@ import           System.IO                       (IOMode(ReadWriteMode))
 --------------------------------------------------------------------------------
 
 -- | Primary certificate, private key and an optional certificate chain.
-data Credential = Credential X509 T.PrivateKey [X509]
+data Credential = Credential X.X509 T.PrivateKey [X.X509]
   deriving (Show)
 
 -- | Convert client `Credential` to the format expected by 'T.pCertificates'.
-credentialToCertList :: Credential -> [(X509, Maybe T.PrivateKey)]
+credentialToCertList :: Credential -> [(X.X509, Maybe T.PrivateKey)]
 credentialToCertList (Credential c pk xs) =
     (c, Just pk) : fmap (\x -> (x, Nothing)) xs
 
@@ -85,7 +86,7 @@ data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 -- See 'makeClientSettings' for the for the default TLS settings used.
 getDefaultClientSettings :: IO ClientSettings
 getDefaultClientSettings =
-    makeClientSettings Nothing Nothing `fmap` getSystemCertificateStore
+    makeClientSettings [] Nothing `fmap` getSystemCertificateStore
 
 -- | Make defaults 'ClientSettings'.
 --
@@ -99,13 +100,15 @@ getDefaultClientSettings =
 -- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
 makeClientSettings
-  :: Maybe Credential     -- ^Credential to provide to the server if requested.
-  -> Maybe NS.HostName    -- ^Explicit Server Name Identification.
-  -> C.CertificateStore   -- ^CAs used to verify the server certificate.
-                          -- Use 'getSystemCertificateStore' to obtaing
-                          -- the operating system's defaults.
+  :: [Credential]        -- ^Credentials to provide to the server, if requested.
+                         -- The first one is used in case we can't choose one
+                         -- based on information provided by the server.
+  -> Maybe NS.HostName   -- ^Explicit Server Name Identification.
+  -> C.CertificateStore  -- ^CAs used to verify the server certificate.
+                         -- Use 'getSystemCertificateStore' to obtaing
+                         -- the operating system's defaults.
   -> ClientSettings
-makeClientSettings mcreds msni cStore =
+makeClientSettings creds msni cStore =
     ClientSettings . T.updateClientParams modClientParams
                    . modParamsCore
                    $ T.defaultParamsClient
@@ -118,9 +121,22 @@ makeClientSettings mcreds msni cStore =
       , T.pCertificates        = []
       , T.onCertificatesRecv   = TE.certificateVerifyChain cStore }
     modClientParams cp = cp
-      { T.onCertificateRequest = const (return certs)
+      { T.onCertificateRequest =
+            return . maybe firstCerts credentialToCertList . findCredential
       , T.clientUseServerName  = msni }
-    certs = maybe [] credentialToCertList mcreds
+
+    -- | Find the first Credential that matches the given requirements.
+    -- Currently, the only requirement considered is the subject DN.
+    findCredential (_, _, dns) = listToMaybe (filter isSubject creds)
+      where
+        isSubject (Credential c _ _) = X.certSubjectDN (X.x509Cert c) `elem` dns
+
+    firstCerts =
+      case creds of
+        (c:_) -> credentialToCertList c
+        []    -> error "makeClientSettings:\
+                       \ no Credential given but server requested one"
+
 
 -- | Update advanced TLS client configuration 'T.Params'.
 -- See the "Network.TLS" module for details.

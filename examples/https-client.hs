@@ -9,6 +9,7 @@ import qualified Data.ByteString.Lazy.Char8 as BL ()
 import           Data.Certificate.X509      (X509)
 import           Data.CertificateStore      (CertificateStore
                                             ,makeCertificateStore)
+import           Data.Maybe                 (maybeToList)
 import           Data.Monoid                ((<>))
 import qualified Network.Simple.TCP.TLS     as Z
 import qualified Network.Socket             as NS
@@ -18,14 +19,14 @@ import           System.Certificate.X509    (getSystemCertificateStore)
 import           System.Console.GetOpt
 import           System.Environment         (getProgName, getArgs)
 
-client :: CertificateStore -> Maybe Z.Credential -> NS.HostName
+client :: CertificateStore -> [Z.Credential] -> NS.HostName
        -> NS.ServiceName -> IO ()
-client cStore cred host port = do
+client cStore creds host port = do
     Z.connect csettings host port $ \(ctx,_) -> do
        T.sendData ctx "GET / HTTP/1.0\r\n\r\n"
        consume ctx B.putStr >> putStrLn ""
   where
-    csettings = Z.makeClientSettings cred (Just host) cStore
+    csettings = Z.makeClientSettings creds (Just host) cStore
 
 -- | Repeatedly receive data from the given 'T.Context' until exhausted,
 -- performing the given action on each received chunk.
@@ -51,7 +52,7 @@ main = do
         let cred = Z.Credential <$> optClientCert opts
                                 <*> optClientKey opts
                                 <*> pure []
-        client cStore cred hostname port
+        client cStore (maybeToList cred) hostname port
       (_,_,msgs) -> do
         pn <- getProgName
         let header = "Usage: " <> pn <> " [OPTIONS] HOSTNAME PORT"

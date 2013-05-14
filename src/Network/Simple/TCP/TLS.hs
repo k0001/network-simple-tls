@@ -70,10 +70,8 @@ data ClientSettings = ClientSettings { unClientSettings :: T.Params }
 
 -- | Client credentials to provide to the TLS server, if requested.
 data Credentials
-  = Credentials
-      X509         -- ^Primary certificate
-      T.PrivateKey -- ^Private key
-      [X509]       -- ^Additional certificates
+  =  Credentials X509 T.PrivateKey [X509]
+  -- ^ Primary certificate, private key and additional certificate chain.
   deriving (Show)
 
 -- | Convert client `Credentials` to the format expected by

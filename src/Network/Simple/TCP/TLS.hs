@@ -350,19 +350,20 @@ useTls k conn@(ctx,_) =
 --------------------------------------------------------------------------------
 -- Utils
 
--- | Receives up to a limited number of bytes from the given 'T.Context'.
+-- | Receives and decrypts up to @16384@ bytes from the given 'T.Context'.
 -- Returns 'Nothing' on EOF.
-recv :: T.Context -> Int -> IO (Maybe B.ByteString)
-recv ctx nbytes = do
-    ebs <- E.try (T.backendRecv (T.ctxConnection ctx) nbytes)
+recv :: T.Context -> IO (Maybe B.ByteString)
+recv ctx = do
+    ebs <- E.try (T.recvData ctx)
     case ebs of
       Left T.Error_EOF     -> return Nothing
       Left e               -> E.throwIO e
-      Right bs | B.null bs -> return Nothing
+      Right bs | B.null bs -> return Nothing -- I think this never happens.
                | otherwise -> return (Just bs)
 {-# INLINABLE recv #-}
 
--- | Sends the given strict 'B.ByteString' through the 'T.Context'.
+-- | Encrypts the given strict 'B.ByteString' and sends it through the
+-- 'T.Context'.
 send :: T.Context -> B.ByteString -> IO ()
 send ctx = T.sendData ctx . BL.fromChunks . (:[])
 {-# INLINABLE send #-}

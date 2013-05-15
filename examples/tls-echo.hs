@@ -25,7 +25,7 @@ server cred hp port mcs = do
     Z.serve ss hp port $ \(ctx,caddr) -> do
        putStrLn $ show caddr <> " joined."
        consume ctx $ \bs -> do
-         putStrLn $ show caddr <> " says: " <> show (B.unpack bs)
+         putStrLn $ show caddr <> " sent " <> show (B.length bs) <> " bytes."
          T.sendData ctx $ BL.fromChunks [B.map toUpper bs]
        putStrLn $ show caddr <> " quit."
 

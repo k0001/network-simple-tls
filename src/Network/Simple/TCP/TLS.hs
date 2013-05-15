@@ -353,7 +353,7 @@ useTls k conn@(ctx,_) =
 -- | Receives and decrypts up to @16384@ bytes from the given 'T.Context'.
 -- Returns 'Nothing' on EOF.
 --
--- Automatically renegotiates the TLS connection a /ClientHello/ message is
+-- Automatically renegotiates the TLS connection if a /ClientHello/ message is
 -- received.
 recv :: T.Context -> IO (Maybe B.ByteString)
 recv ctx = do

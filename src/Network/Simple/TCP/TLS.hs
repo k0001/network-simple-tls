@@ -350,11 +350,11 @@ useTls k conn@(ctx,_) =
 --------------------------------------------------------------------------------
 -- Utils
 
--- | Receives and decrypts up to @16384@ bytes from the given 'T.Context'.
--- Returns 'Nothing' on EOF.
+-- | Receives decrypted bytes from the given 'T.Context'. Returns 'Nothing'
+-- on EOF.
 --
--- Automatically renegotiates the TLS connection if a /ClientHello/ message is
--- received.
+-- Up to @16384@ decrypted bytes will be received at once. The TLS connection is
+-- automatically renegotiated if a /ClientHello/ message is received.
 recv :: T.Context -> IO (Maybe B.ByteString)
 recv ctx = do
     ebs <- E.try (T.recvData ctx)
@@ -375,7 +375,6 @@ send ctx = T.sendData ctx . BL.fromChunks . (:[])
 --------------------------------------------------------------------------------
 -- Internal stuff
 
-
 -- | Perform the given action, swallowing any 'E.IOException' of type
 -- 'Eg.ResourceVanished' if it happens.
 ignoreResourceVanishedErrors :: IO () -> IO ()
@@ -383,7 +382,6 @@ ignoreResourceVanishedErrors = E.handle (\e -> case e of
     Eg.IOError{} | Eg.ioe_type e == Eg.ResourceVanished -> return ()
     _ -> E.throwIO e)
 {-# INLINE ignoreResourceVanishedErrors #-}
-
 
 ----------------------------------------------------------------------------------
 

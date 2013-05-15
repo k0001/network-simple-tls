@@ -341,8 +341,8 @@ useTls k conn@(ctx,_) =
     E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
               (contextClose' ctx)
   where
-    -- If the remote end closes the connection first we might get some
-    -- exceptions. These wrappers work around those exceptions.
+    -- If the remote end closes the connection first or we reached EOF, we
+    -- might get some exceptions. These wrappers work around those exceptions.
     contextClose' = ignoreResourceVanishedErrors . T.contextClose
     bye'          = ignoreResourceVanishedErrors . T.bye
 
@@ -352,6 +352,9 @@ useTls k conn@(ctx,_) =
 
 -- | Receives and decrypts up to @16384@ bytes from the given 'T.Context'.
 -- Returns 'Nothing' on EOF.
+--
+-- Automatically renegotiates the TLS connection a /ClientHello/ message is
+-- received.
 recv :: T.Context -> IO (Maybe B.ByteString)
 recv ctx = do
     ebs <- E.try (T.recvData ctx)

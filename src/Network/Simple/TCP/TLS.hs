@@ -166,12 +166,10 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 --
 -- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
 --
--- [Ciphers supported with 'T.TLS10'] In descending order of preference:
+-- [Ciphers supported for 'T.TLS10', 'T.TLS11' and 'T.TLS12']
+-- In descending order of preference: 'TE.cipher_AES256_SHA256',
+-- 'TE.cipher_AES256_SHA1', 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
---
--- [Ciphers supporeted with 'T.TLS11' and 'T.TLS12'] In descending order of
--- preference: 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
--- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1'.
 makeServerSettings
   :: Credential               -- ^Server credential.
   -> Maybe C.CertificateStore -- ^CAs used to verify the client certificate. If
@@ -197,8 +195,7 @@ makeServerSettings creds mcStore =
     clientCertsCheck certs = case mcStore of
       Nothing -> return T.CertificateUsageAccept
       Just cs -> TE.certificateVerifyChain cs certs
-    chooseCipher ver xs = head (intersect (safeCiphers ver) xs)
-
+    chooseCipher _ver xs = head (intersect defaultCiphers xs)
 
 -- | Update advanced TLS server configuration 'T.Params'.
 -- See the "Network.TLS" module for details.
@@ -383,7 +380,7 @@ ignoreResourceVanishedErrors = E.handle (\e -> case e of
     _ -> E.throwIO e)
 {-# INLINE ignoreResourceVanishedErrors #-}
 
-----------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 defaultVersions :: [T.Version]
 defaultVersions = [T.TLS12, T.TLS11, T.TLS10]
@@ -392,24 +389,14 @@ defaultConnectVersion :: T.Version
 defaultConnectVersion = T.TLS10
 
 defaultCiphers :: [T.Cipher]
-defaultCiphers = aesCiphers ++ rc4Ciphers
+defaultCiphers = ciphers_AES_CBC ++ ciphers_RC4
 
-rc4Ciphers :: [T.Cipher]
-rc4Ciphers = [ TE.cipher_RC4_128_SHA1
-             , TE.cipher_RC4_128_MD5 ]
+ciphers_RC4 :: [T.Cipher]
+ciphers_RC4 = [ TE.cipher_RC4_128_SHA1
+              , TE.cipher_RC4_128_MD5 ]
 
-aesCiphers :: [T.Cipher]
-aesCiphers = [ TE.cipher_AES256_SHA256
-             , TE.cipher_AES256_SHA1
-             , TE.cipher_AES128_SHA256
-             , TE.cipher_AES128_SHA1 ]
-
-safeCiphers :: T.Version -> [T.Cipher]
-safeCiphers T.TLS10 = rc4Ciphers
-safeCiphers T.TLS11 = aesCiphers
-safeCiphers T.TLS12 = aesCiphers
-safeCiphers T.SSL3  = rc4Ciphers
-safeCiphers v       = error ("safeCiphers: Version not supported: " ++ show v)
-{-# INLINABLE safeCiphers #-}
-
-
+ciphers_AES_CBC :: [T.Cipher]
+ciphers_AES_CBC = [ TE.cipher_AES256_SHA256
+                  , TE.cipher_AES256_SHA1
+                  , TE.cipher_AES128_SHA256
+                  , TE.cipher_AES128_SHA1 ]

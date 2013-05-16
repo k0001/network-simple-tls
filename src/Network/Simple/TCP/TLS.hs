@@ -98,9 +98,13 @@ getDefaultClientSettings =
 --
 -- [Version reported during /ClientHello/] 'T.TLS10'.
 --
--- [Supported ciphers] 'TE.cipher_AES256_SHA256', 'TE.cipher_AES256_SHA1',
--- 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
--- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
+-- [Supported cipher suites] In decreasing order of preference:
+-- 'TE.cipher_AES256_SHA256',
+-- 'TE.cipher_AES256_SHA1',
+-- 'TE.cipher_AES128_SHA256',
+-- 'TE.cipher_AES128_SHA1',
+-- 'TE.cipher_RC4_128_SHA1',
+-- 'TE.cipher_RC4_128_MD5'.
 makeClientSettings
   :: [Credential]        -- ^Credentials to provide to the server, if requested.
                          -- The first one is used in case we can't choose one
@@ -166,10 +170,15 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 --
 -- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
 --
--- [Ciphers supported for 'T.TLS10', 'T.TLS11' and 'T.TLS12']
--- In descending order of preference: 'TE.cipher_AES256_SHA256',
--- 'TE.cipher_AES256_SHA1', 'TE.cipher_AES128_SHA256', 'TE.cipher_AES128_SHA1',
--- 'TE.cipher_RC4_128_SHA1', 'TE.cipher_RC4_128_MD5'.
+-- [Supported cipher suites for 'T.TLS10', 'T.TLS11' and 'T.TLS12']
+-- In decreasing order of preference:
+-- 'TE.cipher_AES256_SHA256',
+-- 'TE.cipher_AES256_SHA1',
+-- 'TE.cipher_AES128_SHA256',
+-- 'TE.cipher_AES128_SHA1',
+-- 'TE.cipher_RC4_128_SHA1',
+-- 'TE.cipher_RC4_128_MD5'.
+-- The cipher suite preferred by the client is used.
 makeServerSettings
   :: Credential               -- ^Server credential.
   -> Maybe C.CertificateStore -- ^CAs used to verify the client certificate. If
@@ -195,7 +204,8 @@ makeServerSettings creds mcStore =
     clientCertsCheck certs = case mcStore of
       Nothing -> return T.CertificateUsageAccept
       Just cs -> TE.certificateVerifyChain cs certs
-    chooseCipher _ver xs = head (intersect defaultCiphers xs)
+    -- | Ciphers prefered by the client take precedence.
+    chooseCipher _ cCiphs = head (intersect cCiphs defaultCiphers)
 
 -- | Update advanced TLS server configuration 'T.Params'.
 -- See the "Network.TLS" module for details.

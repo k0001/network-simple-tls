@@ -24,22 +24,19 @@ server cred hp port mcs = do
     let ss = Z.makeServerSettings cred mcs
     Z.serve ss hp port $ \(ctx,caddr) -> do
        putStrLn $ show caddr <> " joined."
-       consume ctx $ \bs -> do
-         putStrLn $ show caddr <> " sent " <> show (B.length bs) <> " bytes."
-         T.sendData ctx $ BL.fromChunks [B.map toUpper bs]
+       consume ctx $ Z.send ctx . B.map toUpper
        putStrLn $ show caddr <> " quit."
-
+  where
 
 -- | Repeatedly receive data from the given 'T.Context' until exhausted,
 -- performing the given action on each received chunk.
 consume :: T.Context -> (B.ByteString -> IO ()) -> IO ()
-consume ctx f = do
-  ebs <- E.try (T.recvData ctx)
-  case ebs of
-    Right bs | B.null bs -> return ()
-             | otherwise -> f bs >> consume ctx f
-    Left T.Error_EOF     -> return ()
-    Left e               -> E.throwIO e
+consume ctx k = do
+    mbs <- Z.recv ctx
+    case mbs of
+      Nothing -> return ()
+      Just bs -> k bs >> consume ctx k
+
 
 main :: IO ()
 main = do

@@ -4,9 +4,7 @@
 module Main (main) where
 
 import           Control.Applicative
-import qualified Control.Exception          as E
 import qualified Data.ByteString.Char8      as B
-import qualified Data.ByteString.Lazy.Char8 as BL
 import           Data.Certificate.X509      (X509)
 import           Data.Char                  (toUpper)
 import           Data.Monoid                ((<>))

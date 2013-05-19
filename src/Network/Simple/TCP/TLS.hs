@@ -44,6 +44,7 @@ module Network.Simple.TCP.TLS (
   , S.HostPreference(..)
   ) where
 
+
 import           Control.Concurrent              (ThreadId, forkIO)
 import qualified Control.Exception               as E
 import           Control.Monad                   (forever)
@@ -355,12 +356,6 @@ useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
 useTls k conn@(ctx,_) =
     E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
               (contextClose' ctx)
-  where
-    -- If the remote end closes the connection first or we reached EOF, we
-    -- might get some exceptions. These wrappers work around those exceptions.
-    contextClose' = ignoreResourceVanishedErrors . T.contextClose
-    bye'          = ignoreResourceVanishedErrors . T.bye
-
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -371,34 +366,39 @@ useTls k conn@(ctx,_) =
 -- Up to @16384@ decrypted bytes will be received at once. The TLS connection is
 -- automatically renegotiated if a /ClientHello/ message is received.
 recv :: T.Context -> IO (Maybe B.ByteString)
-recv ctx = do
-    ebs <- E.try (T.recvData ctx)
-    case ebs of
-      Left T.Error_EOF     -> return Nothing
-      Left e               -> E.throwIO e
-      Right bs | B.null bs -> return Nothing -- I think this never happens.
-               | otherwise -> return (Just bs)
+recv ctx =
+    E.handle (\T.Error_EOF -> return Nothing)
+             (do bs <- T.recvData ctx
+                 if B.null bs
+                    then return Nothing -- I think this never happens
+                    else return (Just bs))
 {-# INLINABLE recv #-}
 
 -- | Encrypts the given strict 'B.ByteString' and sends it through the
 -- 'T.Context'.
 send :: T.Context -> B.ByteString -> IO ()
-send ctx = T.sendData ctx . BL.fromChunks . (:[])
+send ctx bs = T.sendData ctx (BL.fromChunks [bs])
 {-# INLINABLE send #-}
 
+--------------------------------------------------------------------------------
+-- Internal utils
+
+-- | Like `T.contextClose`, except it ignores `ResourceVanished` exceptions.
+contextClose' :: T.Context -> IO ()
+contextClose' ctx =
+    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
+             (T.contextClose ctx)
+{-# INLINE contextClose' #-}
+
+-- | Like `T.bye`, except it ignores `ResourceVanished` exceptions.
+bye' :: T.Context -> IO ()
+bye' ctx =
+    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
+             (T.bye ctx)
+{-# INLINE bye' #-}
 
 --------------------------------------------------------------------------------
--- Internal stuff
-
--- | Perform the given action, swallowing any 'E.IOException' of type
--- 'Eg.ResourceVanished' if it happens.
-ignoreResourceVanishedErrors :: IO () -> IO ()
-ignoreResourceVanishedErrors = E.handle (\e -> case e of
-    Eg.IOError{} | Eg.ioe_type e == Eg.ResourceVanished -> return ()
-    _ -> E.throwIO e)
-{-# INLINE ignoreResourceVanishedErrors #-}
-
---------------------------------------------------------------------------------
+-- Internal: Default ciphers
 
 ciphers_RC4 :: [T.Cipher]
 ciphers_RC4 = [ TE.cipher_RC4_128_SHA1
@@ -415,3 +415,4 @@ preferredCiphers T.TLS12 = ciphers_AES_CBC
 preferredCiphers T.TLS11 = ciphers_AES_CBC
 preferredCiphers T.TLS10 = ciphers_AES_CBC ++ ciphers_RC4
 preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
+

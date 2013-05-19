@@ -120,9 +120,9 @@ makeClientSettings creds msni cStore =
                    $ T.defaultParamsClient
   where
     modParamsCore p = p
-      { T.pConnectVersion      = defaultConnectVersion
-      , T.pAllowedVersions     = defaultVersions
-      , T.pCiphers             = defaultCiphers
+      { T.pConnectVersion      = T.TLS10
+      , T.pAllowedVersions     = [T.TLS12, T.TLS11, T.TLS10]
+      , T.pCiphers             = ciphers_AES_CBC ++ ciphers_RC4
       , T.pUseSession          = True
       , T.pCertificates        = []
       , T.onCertificatesRecv   = TE.certificateVerifyChain cStore }
@@ -170,7 +170,7 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 --
 -- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
 --
--- [Supported cipher suites for 'T.TLS10', 'T.TLS11' and 'T.TLS12']
+-- [Supported cipher suites for 'T.TLS10']
 -- In decreasing order of preference:
 -- 'TE.cipher_AES256_SHA256',
 -- 'TE.cipher_AES256_SHA1',
@@ -178,6 +178,14 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- 'TE.cipher_AES128_SHA1',
 -- 'TE.cipher_RC4_128_SHA1',
 -- 'TE.cipher_RC4_128_MD5'.
+-- The cipher suite preferred by the client is used.
+
+-- [Supported cipher suites for 'T.TLS11' and 'T.TLS12']
+-- In decreasing order of preference:
+-- 'TE.cipher_AES256_SHA256',
+-- 'TE.cipher_AES256_SHA1',
+-- 'TE.cipher_AES128_SHA256',
+-- 'TE.cipher_AES128_SHA1',
 -- The cipher suite preferred by the client is used.
 makeServerSettings
   :: Credential               -- ^Server credential.
@@ -191,9 +199,9 @@ makeServerSettings creds mcStore =
                    $ T.defaultParamsServer
   where
     modParamsCore p = p
-      { T.pConnectVersion      = defaultConnectVersion
-      , T.pAllowedVersions     = defaultVersions
-      , T.pCiphers             = defaultCiphers
+      { T.pConnectVersion      = T.TLS10
+      , T.pAllowedVersions     = [T.TLS12, T.TLS11, T.TLS10]
+      , T.pCiphers             = ciphers_AES_CBC ++ ciphers_RC4
       , T.pUseSession          = True
       , T.pCertificates        = credentialToCertList creds }
     modServerParams sp = sp
@@ -205,7 +213,7 @@ makeServerSettings creds mcStore =
       Nothing -> return T.CertificateUsageAccept
       Just cs -> TE.certificateVerifyChain cs certs
     -- | Ciphers prefered by the client take precedence.
-    chooseCipher _ cCiphs = head (intersect cCiphs defaultCiphers)
+    chooseCipher v cCiphs = head (intersect cCiphs (preferredCiphers v))
 
 -- | Update advanced TLS server configuration 'T.Params'.
 -- See the "Network.TLS" module for details.
@@ -392,15 +400,6 @@ ignoreResourceVanishedErrors = E.handle (\e -> case e of
 
 --------------------------------------------------------------------------------
 
-defaultVersions :: [T.Version]
-defaultVersions = [T.TLS12, T.TLS11, T.TLS10]
-
-defaultConnectVersion :: T.Version
-defaultConnectVersion = T.TLS10
-
-defaultCiphers :: [T.Cipher]
-defaultCiphers = ciphers_AES_CBC ++ ciphers_RC4
-
 ciphers_RC4 :: [T.Cipher]
 ciphers_RC4 = [ TE.cipher_RC4_128_SHA1
               , TE.cipher_RC4_128_MD5 ]
@@ -410,3 +409,9 @@ ciphers_AES_CBC = [ TE.cipher_AES256_SHA256
                   , TE.cipher_AES256_SHA1
                   , TE.cipher_AES128_SHA256
                   , TE.cipher_AES128_SHA1 ]
+
+preferredCiphers :: T.Version -> [T.Cipher]
+preferredCiphers T.TLS12 = ciphers_AES_CBC
+preferredCiphers T.TLS11 = ciphers_AES_CBC
+preferredCiphers T.TLS10 = ciphers_AES_CBC ++ ciphers_RC4
+preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")

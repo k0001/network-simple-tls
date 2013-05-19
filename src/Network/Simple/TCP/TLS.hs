@@ -354,8 +354,8 @@ acceptTls (ServerSettings params) lsock = do
 -- case of exceptions.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
 useTls k conn@(ctx,_) =
-    E.finally (T.handshake ctx >> E.finally (k conn) (bye' ctx))
-              (contextClose' ctx)
+    E.finally (T.handshake ctx >> E.finally (k conn) (byeNoVanish ctx))
+              (contextCloseNoVanish ctx)
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -384,18 +384,18 @@ send ctx bs = T.sendData ctx (BL.fromChunks [bs])
 -- Internal utils
 
 -- | Like `T.contextClose`, except it ignores `ResourceVanished` exceptions.
-contextClose' :: T.Context -> IO ()
-contextClose' ctx =
+contextCloseNoVanish :: T.Context -> IO ()
+contextCloseNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
              (T.contextClose ctx)
-{-# INLINE contextClose' #-}
+{-# INLINE contextCloseNoVanish #-}
 
 -- | Like `T.bye`, except it ignores `ResourceVanished` exceptions.
-bye' :: T.Context -> IO ()
-bye' ctx =
+byeNoVanish :: T.Context -> IO ()
+byeNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
              (T.bye ctx)
-{-# INLINE bye' #-}
+{-# INLINE byeNoVanish #-}
 
 --------------------------------------------------------------------------------
 -- Internal: Default ciphers

@@ -40,6 +40,7 @@ module Network.Simple.TCP.TLS (
   , connectTls
   , acceptTls
   , useTls
+  , useTlsFork
   -- * Exports
   , S.HostPreference(..)
   ) where
@@ -55,7 +56,6 @@ import qualified Data.Certificate.X509           as X
 import qualified Data.CertificateStore           as C
 import           Data.Maybe                      (listToMaybe)
 import           Data.List                       (intersect)
-import qualified GHC.IO.Exception                as Eg
 import qualified Network.Simple.TCP              as S
 import qualified Network.Socket                  as NS
 import qualified Network.TLS                     as T
@@ -282,7 +282,7 @@ acceptFork
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO ThreadId
-acceptFork ss lsock k = forkIO . useTls k =<< acceptTls ss lsock
+acceptFork ss lsock k = useTlsFork k =<< acceptTls ss lsock
 {-# INLINABLE acceptFork #-}
 
 --------------------------------------------------------------------------------
@@ -321,9 +321,10 @@ connectTls :: ClientSettings -> NS.HostName -> NS.ServiceName
            -> IO (T.Context, NS.SockAddr)
 connectTls (ClientSettings params) host port = do
     (csock, caddr) <- S.connectSock host port
-    h <- NS.socketToHandle csock ReadWriteMode
-    ctx <- T.contextNewOnHandle h params' =<< getSystemRandomGen
-    return (ctx, caddr)
+    (`E.onException` NS.sClose csock) $ do
+        h <- NS.socketToHandle csock ReadWriteMode
+        ctx <- T.contextNewOnHandle h params' =<< getSystemRandomGen
+        return (ctx, caddr)
   where
     params' = params { T.onCertificatesRecv = TE.certificateChecks certsCheck }
     certsCheck = [T.onCertificatesRecv params, return . checkHost]
@@ -345,17 +346,29 @@ connectTls (ClientSettings params) host port = do
 acceptTls :: ServerSettings -> NS.Socket -> IO (T.Context, NS.SockAddr)
 acceptTls (ServerSettings params) lsock = do
     (csock, caddr) <- NS.accept lsock
-    h <- NS.socketToHandle csock ReadWriteMode
-    ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
-    return (ctx, caddr)
+    (`E.onException` NS.sClose csock) $ do
+        h <- NS.socketToHandle csock ReadWriteMode
+        ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
+        return (ctx, caddr)
 
 -- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the
 -- given action, and at last say 'T.bye' and close the TLS connection, even in
 -- case of exceptions.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
-useTls k conn@(ctx,_) =
-    E.finally (T.handshake ctx >> E.finally (k conn) (byeNoVanish ctx))
-              (contextCloseNoVanish ctx)
+useTls k conn@(ctx,_) = E.finally act rel where
+    act = do T.handshake ctx
+             k conn `E.finally` discardExceptions (T.bye ctx)
+    rel = do discardExceptions (T.contextClose ctx)
+
+-- | Like 'useTls', except it performs the all the IO actions safely in a
+-- new thread. Use this instead of forking `useTls` yourself.
+useTlsFork :: ((T.Context, NS.SockAddr) -> IO ()) -> (T.Context, NS.SockAddr)
+           -> IO ThreadId
+useTlsFork k conn@(ctx,_) = forkFinally act rel where
+    act    = do T.handshake ctx
+                k conn `E.finally` discardExceptions (T.bye ctx)
+    rel ea = do discardExceptions (T.contextClose ctx)
+                either E.throwIO return ea
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -381,23 +394,6 @@ send ctx bs = T.sendData ctx (BL.fromChunks [bs])
 {-# INLINABLE send #-}
 
 --------------------------------------------------------------------------------
--- Internal utils
-
--- | Like `T.contextClose`, except it ignores `ResourceVanished` exceptions.
-contextCloseNoVanish :: T.Context -> IO ()
-contextCloseNoVanish ctx =
-    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
-             (T.contextClose ctx)
-{-# INLINE contextCloseNoVanish #-}
-
--- | Like `T.bye`, except it ignores `ResourceVanished` exceptions.
-byeNoVanish :: T.Context -> IO ()
-byeNoVanish ctx =
-    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
-             (T.bye ctx)
-{-# INLINE byeNoVanish #-}
-
---------------------------------------------------------------------------------
 -- Internal: Default ciphers
 
 ciphers_RC4 :: [T.Cipher]
@@ -415,4 +411,18 @@ preferredCiphers T.TLS12 = ciphers_AES_CBC
 preferredCiphers T.TLS11 = ciphers_AES_CBC
 preferredCiphers T.TLS10 = ciphers_AES_CBC ++ ciphers_RC4
 preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
+
+--------------------------------------------------------------------------------
+-- Internal utils
+
+-- | 'Control.Concurrent.forkFinally' was introduced in base==4.6.0.0. We'll use
+-- our own version here for a while, until base==4.6.0.0 is widely establised.
+forkFinally :: IO a -> (Either E.SomeException a -> IO ()) -> IO ThreadId
+forkFinally action and_then =
+    E.mask $ \restore ->
+        forkIO $ E.try (restore action) >>= and_then
+
+-- | Dangerous thing: perform the given action ignoring all exceptions.
+discardExceptions :: IO () -> IO ()
+discardExceptions = E.handle (\e -> let _ = e :: E.SomeException in return ())
 

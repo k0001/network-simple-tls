@@ -233,9 +233,9 @@ serverParams f = fmap ServerSettings . f . unServerSettings
 -- handles each of them concurrently, in different threads.
 --
 -- Any acquired network resources are properly closed and discarded when done or
--- in case of exceptions. This function performs 'listen', 'acceptFork',
--- 'T.handshake' and 'T.bye' for you, don't perform those manually when using
--- 'serve'.
+-- in case of exceptions. This function binds a listening socket, accepts an
+-- connection, performs a TLS handshake and then safely closes the connection.
+-- You don't need to perform any of those steps manually.
 serve
   :: ServerSettings
   -> S.HostPreference     -- ^Preferred host to bind.
@@ -256,9 +256,10 @@ serve ss hp port k =
 -- handshake and use the connection.
 --
 -- Any acquired network resources are properly closed and discarded when done or
--- in case of exceptions. This function performs 'T.handshake' and 'T.bye' for
--- you, don't perform those manually when using 'accept'. If you need to manage
--- the lifetime of the connection resources yourself, use 'acceptTls' instead.
+-- in case of exceptions. This function performs a TLS handshake and then safely
+-- closes the accepted connection after using it, so you don't need to perform
+-- any of those steps manually. If you want to manage the lifetime of the
+-- connection resources yourself, use 'acceptTls' instead in case of exceptions.
 accept
   :: ServerSettings
   -> NS.Socket            -- ^Listening and bound socket.

@@ -372,7 +372,7 @@ acceptTls (ServerSettings params) lsock = do
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
 useTls k conn@(ctx,_) = do
     E.finally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
-              (T.contextClose ctx)
+              (contextCloseNoVanish ctx)
 
 -- | Like 'useTls', except it performs the all the IO actions safely in a
 -- new thread. Use this instead of forking `useTls` yourself.
@@ -380,7 +380,7 @@ useTlsFork :: ((T.Context, NS.SockAddr) -> IO ()) -> (T.Context, NS.SockAddr)
            -> IO ThreadId
 useTlsFork k conn@(ctx,_) = do
     forkFinally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
-                (\ea -> T.contextClose ctx >> either E.throwIO return ea)
+                (\ea -> contextCloseNoVanish ctx >> either E.throwIO return ea)
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -432,8 +432,12 @@ byeNoVanish :: T.Context -> IO ()
 byeNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
              (T.bye ctx)
-{-# INLINE byeNoVanish #-}
 
+-- | Like `T.contextClose`, except it ignores `ResourceVanished` exceptions.
+contextCloseNoVanish :: T.Context -> IO ()
+contextCloseNoVanish ctx =
+    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
+             (T.contextClose ctx)
 
 -- | 'Control.Concurrent.forkFinally' was introduced in base==4.6.0.0. We'll use
 -- our own version here for a while, until base==4.6.0.0 is widely establised.

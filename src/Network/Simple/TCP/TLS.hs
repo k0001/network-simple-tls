@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | This module exports common usage patterns for establishing TLS-secured
--- TCP connections, relevant to both the client side and server side of the
+-- | This module exports simple tools for establishing TLS-secured TCP
+-- connections, relevant to both the client side and server side of the
 -- connection.
 --
 -- This module re-exports some functions from the "Network.Simple.TCP" module
@@ -56,6 +56,7 @@ import qualified Data.Certificate.X509           as X
 import qualified Data.CertificateStore           as C
 import           Data.Maybe                      (listToMaybe)
 import           Data.List                       (intersect)
+import qualified GHC.IO.Exception                as Eg
 import qualified Network.Simple.TCP              as S
 import qualified Network.Socket                  as NS
 import qualified Network.TLS                     as T
@@ -234,8 +235,9 @@ serverParams f = fmap ServerSettings . f . unServerSettings
 --
 -- Any acquired network resources are properly closed and discarded when done or
 -- in case of exceptions. This function binds a listening socket, accepts an
--- connection, performs a TLS handshake and then safely closes the connection.
--- You don't need to perform any of those steps manually.
+-- connection, performs a TLS handshake and then safely closes the connection
+-- when done or in case of exceptions. You don't need to perform any of those
+-- steps manually.
 serve
   :: ServerSettings
   -> S.HostPreference     -- ^Preferred host to bind.
@@ -259,7 +261,7 @@ serve ss hp port k =
 -- in case of exceptions. This function performs a TLS handshake and then safely
 -- closes the accepted connection after using it, so you don't need to perform
 -- any of those steps manually. If you want to manage the lifetime of the
--- connection resources yourself, use 'acceptTls' instead in case of exceptions.
+-- connection resources yourself, use 'acceptTls' instead.
 accept
   :: ServerSettings
   -> NS.Socket            -- ^Listening and bound socket.
@@ -269,7 +271,10 @@ accept
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO b
-accept ss lsock k = useTls k =<< acceptTls ss lsock
+accept ss lsock k = E.mask $ \restore -> do
+    acceptTls ss lsock >>= restore . useTls k
+    -- ^We mask asynchronous exceptions here so that 'useTls', which cleans
+    --  up resources in case of exceptions, gets a chance to run.
 {-# INLINABLE accept #-}
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -283,7 +288,10 @@ acceptFork
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO ThreadId
-acceptFork ss lsock k = useTlsFork k =<< acceptTls ss lsock
+acceptFork ss lsock k = E.mask $ \restore -> do
+    acceptTls ss lsock >>= restore . useTlsFork k
+    -- ^We mask asynchronous exceptions here so that 'useTlsFork', which cleans
+    --  up resources in case of exceptions, gets a chance to run.
 {-# INLINABLE acceptFork #-}
 
 --------------------------------------------------------------------------------
@@ -305,7 +313,10 @@ connect
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connect cs host port k = useTls k =<< connectTls cs host port
+connect cs host port k = E.mask $ \restore -> do
+    connectTls cs host port >>= restore . useTls k
+    -- ^We mask asynchronous exceptions here so that 'useTls', which cleans
+    --  up resources in case of exceptions, gets a chance to run.
 
 --------------------------------------------------------------------------------
 
@@ -316,8 +327,8 @@ connect cs host port k = useTls k =<< connectTls cs host port
 -- limited scope.
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
--- for communication purposes, and 'T.bye' afterwards. The 'useTls' function
--- can perform those steps for you.
+-- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
+-- 'useTlsFork' functions can perform those steps for you.
 connectTls :: ClientSettings -> NS.HostName -> NS.ServiceName
            -> IO (T.Context, NS.SockAddr)
 connectTls (ClientSettings params) host port = do
@@ -342,8 +353,8 @@ connectTls (ClientSettings params) host port = do
 -- limited scope.
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
--- for communication purposes, and 'T.bye' afterwards. The 'useTls' function
--- can perform those steps for you.
+-- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
+-- 'useTlsFork' functions can perform those steps for you.
 acceptTls :: ServerSettings -> NS.Socket -> IO (T.Context, NS.SockAddr)
 acceptTls (ServerSettings params) lsock = do
     (csock, caddr) <- NS.accept lsock
@@ -355,21 +366,21 @@ acceptTls (ServerSettings params) lsock = do
 -- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the
 -- given action, and at last say 'T.bye' and close the TLS connection, even in
 -- case of exceptions.
+--
+-- This function discards `ResourceVanished` exceptions that will happen when
+-- trying to say 'T.bye' if the remote end already closed the connection.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
-useTls k conn@(ctx,_) = E.finally act rel where
-    act = do T.handshake ctx
-             k conn `E.finally` discardExceptions (T.bye ctx)
-    rel = do discardExceptions (T.contextClose ctx)
+useTls k conn@(ctx,_) = do
+    E.finally (T.handshake ctx >> E.finally (k conn) (byeNoVanish ctx))
+              (T.contextClose ctx)
 
 -- | Like 'useTls', except it performs the all the IO actions safely in a
 -- new thread. Use this instead of forking `useTls` yourself.
 useTlsFork :: ((T.Context, NS.SockAddr) -> IO ()) -> (T.Context, NS.SockAddr)
            -> IO ThreadId
-useTlsFork k conn@(ctx,_) = forkFinally act rel where
-    act    = do T.handshake ctx
-                k conn `E.finally` discardExceptions (T.bye ctx)
-    rel ea = do discardExceptions (T.contextClose ctx)
-                either E.throwIO return ea
+useTlsFork k conn@(ctx,_) = do
+    forkFinally (T.handshake ctx >> E.finally (k conn) (byeNoVanish ctx))
+                (\ea -> T.contextClose ctx >> either E.throwIO return ea)
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -416,14 +427,17 @@ preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
 --------------------------------------------------------------------------------
 -- Internal utils
 
+-- | Like `T.bye`, except it ignores `ResourceVanished` exceptions.
+byeNoVanish :: T.Context -> IO ()
+byeNoVanish ctx =
+    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
+             (T.bye ctx)
+{-# INLINE byeNoVanish #-}
+
+
 -- | 'Control.Concurrent.forkFinally' was introduced in base==4.6.0.0. We'll use
 -- our own version here for a while, until base==4.6.0.0 is widely establised.
 forkFinally :: IO a -> (Either E.SomeException a -> IO ()) -> IO ThreadId
 forkFinally action and_then =
     E.mask $ \restore ->
         forkIO $ E.try (restore action) >>= and_then
-
--- | Dangerous thing: perform the given action ignoring all exceptions.
-discardExceptions :: IO () -> IO ()
-discardExceptions = E.handle (\e -> let _ = e :: E.SomeException in return ())
-

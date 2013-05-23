@@ -273,8 +273,8 @@ accept
   -> IO b
 accept ss lsock k = E.mask $ \restore -> do
     acceptTls ss lsock >>= restore . useTls k
-    -- ^We mask asynchronous exceptions here so that 'useTls', which cleans
-    --  up resources in case of exceptions, gets a chance to run.
+    -- We mask asynchronous exceptions here so that 'useTls', which cleans
+    -- up resources in case of exceptions, gets a chance to run.
 {-# INLINABLE accept #-}
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -290,8 +290,8 @@ acceptFork
   -> IO ThreadId
 acceptFork ss lsock k = E.mask $ \restore -> do
     acceptTls ss lsock >>= restore . useTlsFork k
-    -- ^We mask asynchronous exceptions here so that 'useTlsFork', which cleans
-    --  up resources in case of exceptions, gets a chance to run.
+    -- We mask asynchronous exceptions here so that 'useTlsFork', which cleans
+    -- up resources in case of exceptions, gets a chance to run.
 {-# INLINABLE acceptFork #-}
 
 --------------------------------------------------------------------------------
@@ -315,8 +315,8 @@ connect
   -> IO r
 connect cs host port k = E.mask $ \restore -> do
     connectTls cs host port >>= restore . useTls k
-    -- ^We mask asynchronous exceptions here so that 'useTls', which cleans
-    --  up resources in case of exceptions, gets a chance to run.
+    -- We mask asynchronous exceptions here so that 'useTls', which cleans
+    -- up resources in case of exceptions, gets a chance to run.
 
 --------------------------------------------------------------------------------
 

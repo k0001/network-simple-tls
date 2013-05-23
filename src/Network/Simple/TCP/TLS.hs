@@ -371,7 +371,7 @@ acceptTls (ServerSettings params) lsock = do
 -- trying to say 'T.bye' if the remote end already closed the connection.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
 useTls k conn@(ctx,_) = do
-    E.finally (T.handshake ctx >> E.finally (k conn) (byeNoVanish ctx))
+    E.finally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
               (T.contextClose ctx)
 
 -- | Like 'useTls', except it performs the all the IO actions safely in a
@@ -379,7 +379,7 @@ useTls k conn@(ctx,_) = do
 useTlsFork :: ((T.Context, NS.SockAddr) -> IO ()) -> (T.Context, NS.SockAddr)
            -> IO ThreadId
 useTlsFork k conn@(ctx,_) = do
-    forkFinally (T.handshake ctx >> E.finally (k conn) (byeNoVanish ctx))
+    forkFinally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
                 (\ea -> T.contextClose ctx >> either E.throwIO return ea)
 
 --------------------------------------------------------------------------------

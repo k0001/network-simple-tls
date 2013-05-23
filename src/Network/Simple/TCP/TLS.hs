@@ -368,7 +368,7 @@ acceptTls (ServerSettings params) lsock = do
 -- case of exceptions.
 --
 -- This function discards `ResourceVanished` exceptions that will happen when
--- trying to say 'T.bye' if the remote end already closed the connection.
+-- trying to close the connection, if the remote end has done it before.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
 useTls k conn@(ctx,_) = do
     E.finally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))

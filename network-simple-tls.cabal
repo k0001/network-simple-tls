@@ -1,7 +1,7 @@
 name:                network-simple-tls
 version:             0.1.0.0
-synopsis:            Simple network sockets usage patterns using TLS security.
-description:         Simple network sockets usage patterns using TLS security.
+synopsis:            Simple interface to TLS secured network sockets.
+description:         Simple interface to TLS secured network sockets.
 homepage:            https://github.com/k0001/network-simple-tls
 bug-reports:         https://github.com/k0001/network-simple-tls/issues
 license:             BSD3

@@ -36,7 +36,6 @@ module Network.Simple.TCP.TLS (
   , recv
   , send
   -- * Low level support
-  , S.bindSock
   , connectTls
   , acceptTls
   , useTls
@@ -79,7 +78,7 @@ credentialToCertList (Credential c pk xs) =
 --------------------------------------------------------------------------------
 -- Client side TLS settings
 
--- | Opaque type representing the configuration settings for a TLS client.
+-- | Abstract type representing the configuration settings for a TLS client.
 --
 -- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain your
 -- 'ClientSettings' value.
@@ -111,9 +110,9 @@ makeClientSettings
   :: [Credential]        -- ^Credentials to provide to the server, if requested.
                          -- The first one is used in case we can't choose one
                          -- based on information provided by the server.
-  -> Maybe NS.HostName   -- ^Explicit Server Name Identification.
+  -> Maybe NS.HostName   -- ^Explicit Server Name Identification (SNI).
   -> C.CertificateStore  -- ^CAs used to verify the server certificate.
-                         -- Use 'getSystemCertificateStore' to obtaing
+                         -- Use 'getSystemCertificateStore' to obtain
                          -- the operating system's defaults.
   -> ClientSettings
 makeClientSettings creds msni cStore =
@@ -160,7 +159,7 @@ clientParams f = fmap ClientSettings . f . unClientSettings
 --------------------------------------------------------------------------------
 -- Server side TLS settings
 
--- | Opaque type representing the configuration settings for a TLS server.
+-- | Abstract type representing the configuration settings for a TLS server.
 --
 -- Use 'makeServerSettings' to obtain your 'ServerSettings' value, and
 -- 'updateServerParams' to update it.
@@ -181,13 +180,13 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- 'TE.cipher_RC4_128_SHA1',
 -- 'TE.cipher_RC4_128_MD5'.
 -- The cipher suite preferred by the client is used.
-
+--
 -- [Supported cipher suites for 'T.TLS11' and 'T.TLS12']
 -- In decreasing order of preference:
 -- 'TE.cipher_AES256_SHA256',
 -- 'TE.cipher_AES256_SHA1',
 -- 'TE.cipher_AES128_SHA256',
--- 'TE.cipher_AES128_SHA1',
+-- 'TE.cipher_AES128_SHA1'.
 -- The cipher suite preferred by the client is used.
 makeServerSettings
   :: Credential               -- ^Server credential.
@@ -235,9 +234,9 @@ serverParams f = fmap ServerSettings . f . unServerSettings
 --
 -- Any acquired network resources are properly closed and discarded when done or
 -- in case of exceptions. This function binds a listening socket, accepts an
--- connection, performs a TLS handshake and then safely closes the connection
--- when done or in case of exceptions. You don't need to perform any of those
--- steps manually.
+-- incoming connection, performs a TLS handshake and then safely closes the
+-- connection when done or in case of exceptions. You don't need to perform any
+-- of those steps manually.
 serve
   :: ServerSettings
   -> S.HostPreference     -- ^Preferred host to bind.
@@ -254,14 +253,14 @@ serve ss hp port k =
 
 --------------------------------------------------------------------------------
 
--- | Accept a single incomming TLS-secured TCP connection, perform a TLS
--- handshake and use the connection.
+-- | Accepts a single incomming TLS-secured TCP connection and use it.
 --
--- Any acquired network resources are properly closed and discarded when done or
--- in case of exceptions. This function performs a TLS handshake and then safely
--- closes the accepted connection after using it, so you don't need to perform
--- any of those steps manually. If you want to manage the lifetime of the
--- connection resources yourself, use 'acceptTls' instead.
+-- A TLS handshake is performed immediately after establishing the TCP
+-- connection.
+--
+-- The connection is properly closed when done or in case of exceptions. If you
+-- need to manage the lifetime of the connection resources yourself, then use
+-- 'acceptTls' instead.
 accept
   :: ServerSettings
   -> NS.Socket            -- ^Listening and bound socket.

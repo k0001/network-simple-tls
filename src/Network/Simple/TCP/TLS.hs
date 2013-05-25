@@ -238,7 +238,7 @@ serverParams f = fmap ServerSettings . f . unServerSettings
 -- connection when done or in case of exceptions. You don't need to perform any
 -- of those steps manually.
 serve
-  :: ServerSettings
+  :: ServerSettings       -- ^TLS settings.
   -> S.HostPreference     -- ^Preferred host to bind.
   -> NS.ServiceName       -- ^Service port to bind.
   -> ((T.Context, NS.SockAddr) -> IO ())
@@ -262,7 +262,7 @@ serve ss hp port k =
 -- need to manage the lifetime of the connection resources yourself, then use
 -- 'acceptTls' instead.
 accept
-  :: ServerSettings
+  :: ServerSettings       -- ^TLS settings.
   -> NS.Socket            -- ^Listening and bound socket.
   -> ((T.Context, NS.SockAddr) -> IO b)
                           -- ^Computation to run in a different thread
@@ -277,7 +277,7 @@ accept ss lsock k = E.bracket (acceptTls ss lsock)
 -- | Like 'accept', except it uses a different thread to performs the TLS
 -- handshake and run the given computation.
 acceptFork
-  :: ServerSettings
+  :: ServerSettings       -- ^TLS settings.
   -> NS.Socket            -- ^Listening and bound socket.
   -> ((T.Context, NS.SockAddr) -> IO ())
                           -- ^Computation to run in a different thread
@@ -300,9 +300,9 @@ acceptFork ss lsock k = E.bracketOnError (acceptTls ss lsock)
 -- need to manage the lifetime of the connection resources yourself, then use
 -- 'connectTls' instead.
 connect
-  :: ClientSettings
-  -> NS.HostName                  -- ^Server hostname.
-  -> NS.ServiceName               -- ^Server service port.
+  :: ClientSettings       -- ^TLS settings.
+  -> NS.HostName          -- ^Server hostname.
+  -> NS.ServiceName       -- ^Server service port.
   -> ((T.Context, NS.SockAddr) -> IO r)
                           -- ^Computation to run after establishing TLS-secured
                           -- TCP connection to the remote server. Takes the TLS
@@ -314,8 +314,9 @@ connect cs host port k = E.bracket (connectTls cs host port)
 
 --------------------------------------------------------------------------------
 
--- | Like 'S.connectSock', except instead of a 'NS.Socket', it returns a secure
--- TLS 'T.Context' configured using the given 'ClientSettings'.
+-- | Estalbishes a TCP connection to a remote server and returns a TLS
+-- 'T.Context' configured on top of it using the given 'ClientSettings'.
+-- The remote end address is also returned.
 --
 -- Prefer to use 'connect' if you will be used the obtained 'T.Context' within a
 -- limited scope.
@@ -340,8 +341,9 @@ connectTls (ClientSettings params) host port = do
         Nothing  -> TE.certificateVerifyDomain host
         Just sni -> TE.certificateVerifyDomain sni
 
--- | Like 'NS.accept', except instead of a 'NS.Socket', it returns a secure
--- TLS 'T.Context' configured using the given 'ServerSettings'.
+-- | Accepts an incoming TCP connection and returns a TLS 'T.Context' configured
+-- on top of it using the given 'ServerSettings'. The remote end address is also
+-- returned.
 --
 -- Prefer to use 'accept' if you will be used the obtained 'T.Context' within a
 -- limited scope.
@@ -360,17 +362,17 @@ acceptTls (ServerSettings params) lsock = do
 -- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the
 -- given action and at last say 'T.bye', even in case of exceptions.
 --
--- This function discards `ResourceVanished` exceptions that will happen when
+-- This function discards 'Eg.ResourceVanished' exceptions that will happen when
 -- trying to say 'T.bye' if the remote end has done it before.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
 useTls k conn@(ctx,_) = E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn)
 
 -- | Similar to 'useTls', except it performs the all the IO actions safely in a
--- new thread and closes the connection after using it. Use this instead of
--- forking `useTls` yourself.
+-- new thread and closes the connection backend after using it. Use this instead
+-- of forking `useTls` yourself.
 --
--- This function discards `ResourceVanished` exceptions that will happen when
--- trying to close the connection socket if the remote end has done it before.
+-- This function discards 'Eg.ResourceVanished' exceptions that will happen when
+-- trying to close the connection backend if the remote end has done it before.
 useTlsThenCloseFork :: ((T.Context, NS.SockAddr) -> IO ())
                     -> (T.Context, NS.SockAddr) -> IO ThreadId
 useTlsThenCloseFork k conn@(ctx,_) = do
@@ -428,13 +430,13 @@ preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
 --------------------------------------------------------------------------------
 -- Internal utils
 
--- | Like `T.bye`, except it ignores `ResourceVanished` exceptions.
+-- | Like 'T.bye', except it ignores 'Eg.ResourceVanished' exceptions.
 byeNoVanish :: T.Context -> IO ()
 byeNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
              (T.bye ctx)
 
--- | Like `T.contextClose`, except it ignores `ResourceVanished` exceptions.
+-- | Like 'T.contextClose', except it ignores 'Eg.ResourceVanished' exceptions.
 contextCloseNoVanish :: T.Context -> IO ()
 contextCloseNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())

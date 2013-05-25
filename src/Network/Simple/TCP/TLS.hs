@@ -39,7 +39,7 @@ module Network.Simple.TCP.TLS (
   , connectTls
   , acceptTls
   , useTls
-  , useTlsFork
+  , useTlsThenCloseFork
   -- * Exports
   , S.HostPreference(..)
   ) where
@@ -270,11 +270,9 @@ accept
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO b
-accept ss lsock k = E.mask $ \restore -> do
-    acceptTls ss lsock >>= restore . useTls k
-    -- We mask asynchronous exceptions here so that 'useTls', which cleans
-    -- up resources in case of exceptions, gets a chance to run.
-{-# INLINABLE accept #-}
+accept ss lsock k = E.bracket (acceptTls ss lsock)
+                              (contextCloseNoVanish . fst)
+                              (useTls k)
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
 -- handshake and run the given computation.
@@ -287,11 +285,9 @@ acceptFork
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> IO ThreadId
-acceptFork ss lsock k = E.mask $ \restore -> do
-    acceptTls ss lsock >>= restore . useTlsFork k
-    -- We mask asynchronous exceptions here so that 'useTlsFork', which cleans
-    -- up resources in case of exceptions, gets a chance to run.
-{-# INLINABLE acceptFork #-}
+acceptFork ss lsock k = E.bracketOnError (acceptTls ss lsock)
+                                         (contextCloseNoVanish . fst)
+                                         (useTlsThenCloseFork k)
 
 --------------------------------------------------------------------------------
 
@@ -312,10 +308,9 @@ connect
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
   -> IO r
-connect cs host port k = E.mask $ \restore -> do
-    connectTls cs host port >>= restore . useTls k
-    -- We mask asynchronous exceptions here so that 'useTls', which cleans
-    -- up resources in case of exceptions, gets a chance to run.
+connect cs host port k = E.bracket (connectTls cs host port)
+                                   (contextCloseNoVanish . fst)
+                                   (useTls k)
 
 --------------------------------------------------------------------------------
 
@@ -327,7 +322,7 @@ connect cs host port k = E.mask $ \restore -> do
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
 -- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
--- 'useTlsFork' functions can perform those steps for you.
+-- 'useTlsThenCloseFork' functions can perform those steps for you.
 connectTls :: ClientSettings -> NS.HostName -> NS.ServiceName
            -> IO (T.Context, NS.SockAddr)
 connectTls (ClientSettings params) host port = do
@@ -353,7 +348,7 @@ connectTls (ClientSettings params) host port = do
 --
 -- You need to call 'T.handshake' on the resulting 'T.Context' before using it
 -- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
--- 'useTlsFork' functions can perform those steps for you.
+-- 'useTlsThenCloseFork' functions can perform those steps for you.
 acceptTls :: ServerSettings -> NS.Socket -> IO (T.Context, NS.SockAddr)
 acceptTls (ServerSettings params) lsock = do
     (csock, caddr) <- NS.accept lsock
@@ -363,23 +358,30 @@ acceptTls (ServerSettings params) lsock = do
         return (ctx, caddr)
 
 -- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the
--- given action, and at last say 'T.bye' and close the TLS connection, even in
--- case of exceptions.
+-- given action and at last say 'T.bye', even in case of exceptions.
 --
 -- This function discards `ResourceVanished` exceptions that will happen when
--- trying to close the connection, if the remote end has done it before.
+-- trying to say 'T.bye' if the remote end has done it before.
 useTls :: ((T.Context, NS.SockAddr) -> IO a) -> (T.Context, NS.SockAddr) -> IO a
-useTls k conn@(ctx,_) = do
-    E.finally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
-              (contextCloseNoVanish ctx)
+useTls k conn@(ctx,_) = E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn)
 
--- | Like 'useTls', except it performs the all the IO actions safely in a
--- new thread. Use this instead of forking `useTls` yourself.
-useTlsFork :: ((T.Context, NS.SockAddr) -> IO ()) -> (T.Context, NS.SockAddr)
-           -> IO ThreadId
-useTlsFork k conn@(ctx,_) = do
+-- | Similar to 'useTls', except it performs the all the IO actions safely in a
+-- new thread and closes the connection after using it. Use this instead of
+-- forking `useTls` yourself.
+--
+-- This function discards `ResourceVanished` exceptions that will happen when
+-- trying to close the connection socket if the remote end has done it before.
+useTlsThenCloseFork :: ((T.Context, NS.SockAddr) -> IO ())
+                    -> (T.Context, NS.SockAddr) -> IO ThreadId
+useTlsThenCloseFork k conn@(ctx,_) = do
     forkFinally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
-                (\ea -> contextCloseNoVanish ctx >> either E.throwIO return ea)
+                (\e1 -> do
+                    e2 <- E.try $ contextCloseNoVanish ctx
+                    -- in case both e1 and e2 hold exceptions, we throw e1.
+                    case (e1,e2) of
+                      (Left e, _) -> E.throwIO e
+                      (_, Left e) -> E.throwIO (e :: E.SomeException)
+                      _           -> return ())
 
 --------------------------------------------------------------------------------
 -- Utils

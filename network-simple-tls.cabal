@@ -29,6 +29,8 @@ library
                    , network-simple    (>=0.2     && <0.3)
                    , tls               (>=1.1     && <1.2)
                    , tls-extra         (>=0.6     && <0.7)
+
+  ghc-options:      -Wall -O2
   ghc-prof-options: -prof -fprof-auto-top
 
 

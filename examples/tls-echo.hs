@@ -37,7 +37,7 @@ consume ctx k = do
 
 
 main :: IO ()
-main = do
+main = Z.withSocketsDo $ do
     args <- getArgs
     case getOpt RequireOrder options args of
       (actions, [hostname,port], _) -> do

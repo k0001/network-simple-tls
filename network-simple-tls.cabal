@@ -33,28 +33,3 @@ library
   ghc-options:      -Wall -O2
   ghc-prof-options: -prof -fprof-auto-top
 
-
-
-------------------------------------------------------------------------
--- Examples. All built when the 'examples' flag is given.
-
-flag examples
-  description:         Build examples
-  default:             False
-
-executable network-simple-tls-example-https-client
-  if !flag(examples)
-    buildable: False
-  hs-source-dirs:      examples
-  main-is:             https-client.hs
-  build-depends:       base, bytestring, network-simple-tls, network,
-                       tls-extra, tls, certificate
-
-executable network-simple-tls-example-echo
-  if !flag(examples)
-    buildable: False
-  hs-source-dirs:      examples
-  main-is:             tls-echo.hs
-  build-depends:       base, bytestring, network-simple-tls, network,
-                       tls-extra, tls, certificate
-

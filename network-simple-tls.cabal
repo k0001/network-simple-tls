@@ -27,7 +27,7 @@ library
                    , crypto-random     (>=0.0     && <0.1)
                    , network           (>=2.3     && <2.5)
                    , network-simple    (>=0.2     && <0.3)
-                   , tls               (>=1.4     && <1.5)
+                   , tls               (>=1.1.4   && <1.2)
                    , tls-extra         (>=0.6.5   && <0.7)
 
   ghc-options:      -Wall -O2

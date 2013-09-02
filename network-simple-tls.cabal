@@ -1,5 +1,5 @@
 name:                network-simple-tls
-version:             0.1.1.0
+version:             0.2.0
 synopsis:            Simple interface to TLS secured network sockets.
 description:         Simple interface to TLS secured network sockets.
 homepage:            https://github.com/k0001/network-simple-tls

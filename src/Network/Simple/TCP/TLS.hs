@@ -57,7 +57,7 @@ module Network.Simple.TCP.TLS (
 import           Control.Concurrent              (ThreadId, forkIO)
 import qualified Control.Exception               as E
 import           Control.Monad                   (forever)
-import           Crypto.Random.API               (getSystemRandomGen)
+import           Crypto.Random                   (SystemRNG, createEntropyPool, cprgCreate)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
 import qualified Data.Certificate.X509           as X
@@ -365,7 +365,10 @@ connectTls (ClientSettings params) host port = do
     (csock, caddr) <- S.connectSock host port
     (`E.onException` NS.sClose csock) $ do
         h <- NS.socketToHandle csock ReadWriteMode
-        ctx <- T.contextNewOnHandle h params' =<< getSystemRandomGen
+        ctx <- do
+            pool <- createEntropyPool
+            let cprg = cprgCreate pool
+            T.contextNewOnHandle h params' (cprg :: SystemRNG)
         return (ctx, caddr)
   where
     params' = params { T.onCertificatesRecv = TE.certificateChecks certsCheck }
@@ -391,7 +394,10 @@ acceptTls (ServerSettings params) lsock = do
     (csock, caddr) <- NS.accept lsock
     (`E.onException` NS.sClose csock) $ do
         h <- NS.socketToHandle csock ReadWriteMode
-        ctx <- T.contextNewOnHandle h params =<< getSystemRandomGen
+        ctx <- do
+            pool <- createEntropyPool
+            let cprg = cprgCreate pool
+            T.contextNewOnHandle h params (cprg :: SystemRNG)
         return (ctx, caddr)
 
 -- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the

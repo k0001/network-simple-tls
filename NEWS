@@ -1,3 +1,10 @@
+# Version HEAD
+
+* Drop dependency on `monad-random-api` in favour of `monad-random`.
+
+* Dependency bumps.
+
+
 # Version 0.1.1.0
 
 * Export 'Network.Socket.withSocketsDo' from 'Network.Simple.TCP.TLS'.

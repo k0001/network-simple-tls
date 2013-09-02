@@ -1,5 +1,8 @@
 # Version HEAD
 
+* Generalize the `IO` monad by using `MonadIO` and `MonadCatch` (from
+  the `exceptions` library).
+
 * Drop dependency on `monad-random-api` in favour of `monad-random`.
 
 * Dependency bumps.

@@ -64,7 +64,7 @@ import qualified Control.Exception               as E
 import           Control.Monad
 import qualified Control.Monad.Catch             as C
 import           Control.Monad.IO.Class          (MonadIO(liftIO))
-import           Crypto.Random                   (SystemRNG, createEntropyPool, cprgCreate)
+import qualified Crypto.Random.AESCtr            as AESCtr
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
 import qualified Data.Certificate.X509           as X
@@ -379,10 +379,7 @@ connectTls (ClientSettings params) host port = liftIO $ do
     (csock, caddr) <- S.connectSock host port
     (`E.onException` NS.sClose csock) $ do
         h <- NS.socketToHandle csock ReadWriteMode
-        ctx <- do
-            pool <- createEntropyPool
-            let cprg = cprgCreate pool
-            T.contextNewOnHandle h params' (cprg :: SystemRNG)
+        ctx <- T.contextNewOnHandle h params' =<< AESCtr.makeSystem
         return (ctx, caddr)
   where
     params' = params { T.onCertificatesRecv = TE.certificateChecks certsCheck }
@@ -409,10 +406,7 @@ acceptTls (ServerSettings params) lsock = liftIO $ do
     (csock, caddr) <- NS.accept lsock
     (`E.onException` NS.sClose csock) $ do
         h <- NS.socketToHandle csock ReadWriteMode
-        ctx <- do
-            pool <- createEntropyPool
-            let cprg = cprgCreate pool
-            T.contextNewOnHandle h params (cprg :: SystemRNG)
+        ctx <- T.contextNewOnHandle h params =<< AESCtr.makeSystem
         return (ctx, caddr)
 
 -- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the

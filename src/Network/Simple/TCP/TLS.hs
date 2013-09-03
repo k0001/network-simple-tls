@@ -73,6 +73,7 @@ import qualified Data.Certificate.X509           as X
 import qualified Data.CertificateStore           as C
 import           Data.Maybe                      (listToMaybe)
 import           Data.List                       (intersect)
+import           Foreign.C.Error                 (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception                as Eg
 import qualified Network.Simple.TCP              as S
 import qualified Network.Socket                  as NS
@@ -475,8 +476,12 @@ preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
 -- | Like 'T.bye', except it ignores 'Eg.ResourceVanished' exceptions.
 byeNoVanish :: Context -> IO ()
 byeNoVanish ctx =
-    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
-             (T.bye ctx)
+    E.catch (T.bye ctx) $ \e -> case e of
+        Eg.IOError{ Eg.ioe_type  = Eg.ResourceVanished
+                  , Eg.ioe_errno = Just ioe
+                  } | Errno ioe == ePIPE
+          -> return ()
+        _ -> E.throwIO e
 
 -- | 'Control.Concurrent.forkFinally' was introduced in base==4.6.0.0. We'll use
 -- our own version here for a while, until base==4.6.0.0 is widely establised.

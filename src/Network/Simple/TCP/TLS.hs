@@ -369,7 +369,7 @@ connectTls
   => ClientSettings -> HostName -> ServiceName -> m (Context, SockAddr)
 connectTls (ClientSettings params) host port = liftIO $ do
     (csock, caddr) <- S.connectSock host port
-    (`E.onException` NS.sClose csock) $ do
+    (`E.onException` S.closeSock csock) $ do
         h <- NS.socketToHandle csock ReadWriteMode
         ctx <- T.contextNewOnHandle h params' =<< AESCtr.makeSystem
         return (ctx, caddr)
@@ -395,7 +395,7 @@ connectTls (ClientSettings params) host port = liftIO $ do
 acceptTls :: MonadIO m => ServerSettings -> Socket -> m (Context, SockAddr)
 acceptTls (ServerSettings params) lsock = liftIO $ do
     (csock, caddr) <- NS.accept lsock
-    (`E.onException` NS.sClose csock) $ do
+    (`E.onException` S.closeSock csock) $ do
         h <- NS.socketToHandle csock ReadWriteMode
         ctx <- T.contextNewOnHandle h params =<< AESCtr.makeSystem
         return (ctx, caddr)

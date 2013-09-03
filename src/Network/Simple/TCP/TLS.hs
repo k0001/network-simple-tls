@@ -308,7 +308,7 @@ accept
                           -- TLS connection context and remote end address.
   -> m r
 accept ss lsock k = C.bracket (acceptTls ss lsock)
-                              (liftIO . contextCloseNoVanish . fst)
+                              (liftIO . T.contextClose . fst)
                               (useTls k)
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -325,7 +325,7 @@ acceptFork
   -> m ThreadId
 acceptFork ss lsock k = liftIO $ do
     E.bracketOnError (acceptTls ss lsock)
-                     (contextCloseNoVanish . fst)
+                     (T.contextClose . fst)
                      (useTlsThenCloseFork k)
 
 --------------------------------------------------------------------------------
@@ -349,7 +349,7 @@ connect
                           -- connection context and remote end address.
   -> m r
 connect cs host port k = C.bracket (connectTls cs host port)
-                                   (liftIO . contextCloseNoVanish . fst)
+                                   (liftIO . T.contextClose . fst)
                                    (useTls k)
 
 --------------------------------------------------------------------------------
@@ -425,13 +425,7 @@ useTlsThenCloseFork
   -> ((Context, SockAddr) -> m ThreadId)
 useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
     forkFinally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
-                (\e1 -> do
-                    e2 <- E.try $ contextCloseNoVanish ctx
-                    -- in case both e1 and e2 hold exceptions, we throw e1.
-                    case (e1,e2) of
-                      (Left e, _) -> E.throwIO e
-                      (_, Left e) -> E.throwIO (e :: E.SomeException)
-                      _           -> return ())
+                (\eu -> T.contextClose ctx >> either E.throwIO return eu)
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -483,12 +477,6 @@ byeNoVanish :: Context -> IO ()
 byeNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
              (T.bye ctx)
-
--- | Like 'T.contextClose', except it ignores 'Eg.ResourceVanished' exceptions.
-contextCloseNoVanish :: Context -> IO ()
-contextCloseNoVanish ctx =
-    E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
-             (T.contextClose ctx)
 
 -- | 'Control.Concurrent.forkFinally' was introduced in base==4.6.0.0. We'll use
 -- our own version here for a while, until base==4.6.0.0 is widely establised.

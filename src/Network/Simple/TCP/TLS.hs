@@ -54,7 +54,10 @@ module Network.Simple.TCP.TLS (
   , NS.withSocketsDo
 
   -- * Exports
-  , S.HostPreference(..)
+  -- $exports
+  , module Network.Simple.TCP
+  , module Network.Socket
+  , module Network.TLS
   ) where
 
 
@@ -77,6 +80,24 @@ import qualified Network.TLS                     as T
 import           Network.TLS.Extra               as TE
 import           System.Certificate.X509         (getSystemCertificateStore)
 import           System.IO                       (IOMode(ReadWriteMode))
+
+--------------------------------------------------------------------------------
+
+import Network.Simple.TCP (HostPreference(Host, HostAny, HostIPv4, HostIPv6))
+import Network.Socket     (HostName, ServiceName, Socket, SockAddr)
+import Network.TLS        (Context)
+
+-- $exports
+--
+-- For your convenience, this module module also re-exports the following types
+-- from other modules:
+--
+-- [From "Network.Socket"] 'HostName', 'ServiceName', 'Socket', 'SockAddr'.
+--
+-- [From "Network.Simple.TCP"]
+--   @'HostPreference'('Host','HostAny','HostIPv4','HostIPv6')@.
+--
+-- [From "Network.TLS"] 'Context'.
 
 --------------------------------------------------------------------------------
 
@@ -124,7 +145,7 @@ makeClientSettings
   :: [Credential]        -- ^Credentials to provide to the server, if requested.
                          -- The first one is used in case we can't choose one
                          -- based on information provided by the server.
-  -> Maybe NS.HostName   -- ^Explicit Server Name Identification (SNI).
+  -> Maybe HostName      -- ^Explicit Server Name Identification (SNI).
   -> C.CertificateStore  -- ^CAs used to verify the server certificate.
                          -- Use 'getSystemCertificateStore' to obtain
                          -- the operating system's defaults.
@@ -255,8 +276,8 @@ serve
   :: MonadIO m
   => ServerSettings       -- ^TLS settings.
   -> S.HostPreference     -- ^Preferred host to bind.
-  -> NS.ServiceName       -- ^Service port to bind.
-  -> ((T.Context, NS.SockAddr) -> IO ())
+  -> ServiceName          -- ^Service port to bind.
+  -> ((Context, SockAddr) -> IO ())
                           -- ^Computation to run in a different thread
                           -- once an incomming connection is accepted and a
                           -- TLS-secured communication is established. Takes the
@@ -279,8 +300,8 @@ serve ss hp port k = liftIO $ do
 accept
   :: (MonadIO m, C.MonadCatch m)
   => ServerSettings       -- ^TLS settings.
-  -> NS.Socket            -- ^Listening and bound socket.
-  -> ((T.Context, NS.SockAddr) -> m r)
+  -> Socket            -- ^Listening and bound socket.
+  -> ((Context, SockAddr) -> m r)
                           -- ^Computation to run in a different thread
                           -- once an incomming connection is accepted and a
                           -- TLS-secured communication is established. Takes the
@@ -295,8 +316,8 @@ accept ss lsock k = C.bracket (acceptTls ss lsock)
 acceptFork
   :: MonadIO m
   => ServerSettings       -- ^TLS settings.
-  -> NS.Socket            -- ^Listening and bound socket.
-  -> ((T.Context, NS.SockAddr) -> IO ())
+  -> Socket               -- ^Listening and bound socket.
+  -> ((Context, SockAddr) -> IO ())
                           -- ^Computation to run in a different thread
                           -- once an incomming connection is accepted and a
                           -- TLS-secured communication is established. Takes the
@@ -320,9 +341,9 @@ acceptFork ss lsock k = liftIO $ do
 connect
   :: (MonadIO m, C.MonadCatch m)
   => ClientSettings       -- ^TLS settings.
-  -> NS.HostName          -- ^Server hostname.
-  -> NS.ServiceName       -- ^Server service port.
-  -> ((T.Context, NS.SockAddr) -> m r)
+  -> HostName             -- ^Server hostname.
+  -> ServiceName          -- ^Server service port.
+  -> ((Context, SockAddr) -> m r)
                           -- ^Computation to run after establishing TLS-secured
                           -- TCP connection to the remote server. Takes the TLS
                           -- connection context and remote end address.
@@ -334,19 +355,18 @@ connect cs host port k = C.bracket (connectTls cs host port)
 --------------------------------------------------------------------------------
 
 -- | Estalbishes a TCP connection to a remote server and returns a TLS
--- 'T.Context' configured on top of it using the given 'ClientSettings'.
+-- 'Context' configured on top of it using the given 'ClientSettings'.
 -- The remote end address is also returned.
 --
--- Prefer to use 'connect' if you will be used the obtained 'T.Context' within a
+-- Prefer to use 'connect' if you will be used the obtained 'Context' within a
 -- limited scope.
 --
--- You need to call 'T.handshake' on the resulting 'T.Context' before using it
+-- You need to call 'T.handshake' on the resulting 'Context' before using it
 -- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
 -- 'useTlsThenCloseFork' functions can perform those steps for you.
 connectTls
   :: MonadIO m
-  => ClientSettings -> NS.HostName -> NS.ServiceName
-  -> m (T.Context, NS.SockAddr)
+  => ClientSettings -> HostName -> ServiceName -> m (Context, SockAddr)
 connectTls (ClientSettings params) host port = liftIO $ do
     (csock, caddr) <- S.connectSock host port
     (`E.onException` NS.sClose csock) $ do
@@ -362,18 +382,17 @@ connectTls (ClientSettings params) host port = liftIO $ do
         Nothing  -> TE.certificateVerifyDomain host
         Just sni -> TE.certificateVerifyDomain sni
 
--- | Accepts an incoming TCP connection and returns a TLS 'T.Context' configured
+-- | Accepts an incoming TCP connection and returns a TLS 'Context' configured
 -- on top of it using the given 'ServerSettings'. The remote end address is also
 -- returned.
 --
--- Prefer to use 'accept' if you will be used the obtained 'T.Context' within a
+-- Prefer to use 'accept' if you will be used the obtained 'Context' within a
 -- limited scope.
 --
--- You need to call 'T.handshake' on the resulting 'T.Context' before using it
+-- You need to call 'T.handshake' on the resulting 'Context' before using it
 -- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
 -- 'useTlsThenCloseFork' functions can perform those steps for you.
-acceptTls
-  :: MonadIO m => ServerSettings -> NS.Socket -> m (T.Context, NS.SockAddr)
+acceptTls :: MonadIO m => ServerSettings -> Socket -> m (Context, SockAddr)
 acceptTls (ServerSettings params) lsock = liftIO $ do
     (csock, caddr) <- NS.accept lsock
     (`E.onException` NS.sClose csock) $ do
@@ -381,15 +400,15 @@ acceptTls (ServerSettings params) lsock = liftIO $ do
         ctx <- T.contextNewOnHandle h params =<< AESCtr.makeSystem
         return (ctx, caddr)
 
--- | Perform a TLS 'T.handshake' on the given 'T.Context', then perform the
+-- | Perform a TLS 'T.handshake' on the given 'Context', then perform the
 -- given action and at last say 'T.bye', even in case of exceptions.
 --
 -- This function discards 'Eg.ResourceVanished' exceptions that will happen when
 -- trying to say 'T.bye' if the remote end has done it before.
 useTls
   :: (MonadIO m, C.MonadCatch m)
-  => ((T.Context, NS.SockAddr) -> m a)
-  -> ((T.Context, NS.SockAddr) -> m a)
+  => ((Context, SockAddr) -> m a)
+  -> ((Context, SockAddr) -> m a)
 useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
                                    (liftIO $ byeNoVanish ctx)
                                    (k conn)
@@ -402,8 +421,8 @@ useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
 -- trying to close the connection backend if the remote end has done it before.
 useTlsThenCloseFork
   :: MonadIO m
-  => ((T.Context, NS.SockAddr) -> IO ())
-  -> ((T.Context, NS.SockAddr) -> m ThreadId)
+  => ((Context, SockAddr) -> IO ())
+  -> ((Context, SockAddr) -> m ThreadId)
 useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
     forkFinally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
                 (\e1 -> do
@@ -417,12 +436,12 @@ useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
 --------------------------------------------------------------------------------
 -- Utils
 
--- | Receives decrypted bytes from the given 'T.Context'. Returns 'Nothing'
+-- | Receives decrypted bytes from the given 'Context'. Returns 'Nothing'
 -- on EOF.
 --
 -- Up to @16384@ decrypted bytes will be received at once. The TLS connection is
 -- automatically renegotiated if a /ClientHello/ message is received.
-recv :: MonadIO m => T.Context -> m (Maybe B.ByteString)
+recv :: MonadIO m => Context -> m (Maybe B.ByteString)
 recv ctx = liftIO $ do
     E.handle (\T.Error_EOF -> return Nothing)
              (do bs <- T.recvData ctx
@@ -432,8 +451,8 @@ recv ctx = liftIO $ do
 {-# INLINABLE recv #-}
 
 -- | Encrypts the given strict 'B.ByteString' and sends it through the
--- 'T.Context'.
-send :: MonadIO m => T.Context -> B.ByteString -> m ()
+-- 'Context'.
+send :: MonadIO m => Context -> B.ByteString -> m ()
 send ctx bs = T.sendData ctx (BL.fromChunks [bs])
 {-# INLINABLE send #-}
 
@@ -460,13 +479,13 @@ preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
 -- Internal utils
 
 -- | Like 'T.bye', except it ignores 'Eg.ResourceVanished' exceptions.
-byeNoVanish :: T.Context -> IO ()
+byeNoVanish :: Context -> IO ()
 byeNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
              (T.bye ctx)
 
 -- | Like 'T.contextClose', except it ignores 'Eg.ResourceVanished' exceptions.
-contextCloseNoVanish :: T.Context -> IO ()
+contextCloseNoVanish :: Context -> IO ()
 contextCloseNoVanish ctx =
     E.handle (\Eg.IOError{Eg.ioe_type=Eg.ResourceVanished} -> return ())
              (T.contextClose ctx)

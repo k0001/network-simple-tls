@@ -1,5 +1,10 @@
 # Version HEAD
 
+* Re-export `Socket`, `SockAddr`, `HostName` and `ServiceName` from
+  `Network.Socket` at `Network.Simple.TCP.TLS`.
+
+* Re-export `Context` from `Network.TLS` at `Network.Simple.TCP.TLS`.
+
 * Generalize the `IO` monad by using `MonadIO` and `MonadCatch` (from
   the `exceptions` library).
 

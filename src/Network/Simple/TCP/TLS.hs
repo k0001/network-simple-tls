@@ -45,10 +45,10 @@ module Network.Simple.TCP.TLS (
   , send
 
   -- * Low level support
-  , connectTls
-  , acceptTls
   , useTls
   , useTlsThenCloseFork
+  , connectTls
+  , acceptTls
 
   -- * Note to Windows users
   , NS.withSocketsDo
@@ -359,12 +359,14 @@ connect cs host port k = C.bracket (connectTls cs host port)
 -- 'Context' configured on top of it using the given 'ClientSettings'.
 -- The remote end address is also returned.
 --
--- Prefer to use 'connect' if you will be used the obtained 'Context' within a
+-- Prefer to use 'connect' if you will be using the obtained 'Context' within a
 -- limited scope.
 --
 -- You need to call 'T.handshake' on the resulting 'Context' before using it
--- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
--- 'useTlsThenCloseFork' functions can perform those steps for you.
+-- for communication purposes, and gracefully close the TLS and TCP connections
+-- afterwards using 'T.bye' and 'T.contextClose'. The 'useTls' and
+-- 'T.contextClose', or 'useTlsThenCloseFork' functions can perform some of
+-- those steps for you.
 connectTls
   :: MonadIO m
   => ClientSettings -> HostName -> ServiceName -> m (Context, SockAddr)
@@ -387,12 +389,14 @@ connectTls (ClientSettings params) host port = liftIO $ do
 -- on top of it using the given 'ServerSettings'. The remote end address is also
 -- returned.
 --
--- Prefer to use 'accept' if you will be used the obtained 'Context' within a
+-- Prefer to use 'accept' if you will be using the obtained 'Context' within a
 -- limited scope.
 --
 -- You need to call 'T.handshake' on the resulting 'Context' before using it
--- for communication purposes, and 'T.bye' afterwards. The 'useTls' or
--- 'useTlsThenCloseFork' functions can perform those steps for you.
+-- for communication purposes, and gracefully close the TLS and TCP connections
+-- afterwards using 'T.bye' and 'T.contextClose'. The 'useTls' and
+-- 'T.contextClose', or 'useTlsThenCloseFork' functions can perform some of
+-- those steps for you.
 acceptTls :: MonadIO m => ServerSettings -> Socket -> m (Context, SockAddr)
 acceptTls (ServerSettings params) lsock = liftIO $ do
     (csock, caddr) <- NS.accept lsock
@@ -401,32 +405,30 @@ acceptTls (ServerSettings params) lsock = liftIO $ do
         ctx <- T.contextNewOnHandle h params =<< AESCtr.makeSystem
         return (ctx, caddr)
 
--- | Perform a TLS 'T.handshake' on the given 'Context', then perform the
--- given action and at last say 'T.bye', even in case of exceptions.
+-- | Perform a TLS handshake on the given 'Context', then perform the
+-- given action and at last gracefully close the TLS session
 --
--- This function discards 'Eg.ResourceVanished' exceptions that will happen when
--- trying to say 'T.bye' if the remote end has done it before.
+-- This function does not close the underlying TCP connection; for that you
+-- must use 'T.contextClose' afterwards.
 useTls
   :: (MonadIO m, C.MonadCatch m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
 useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
-                                   (liftIO $ byeNoVanish ctx)
+                                   (liftIO $ byeTls ctx)
                                    (k conn)
 
 -- | Similar to 'useTls', except it performs the all the IO actions safely in a
 -- new thread and closes the connection backend after using it. Use this instead
 -- of forking `useTls` yourself.
---
--- This function discards 'Eg.ResourceVanished' exceptions that will happen when
--- trying to close the connection backend if the remote end has done it before.
 useTlsThenCloseFork
   :: MonadIO m
   => ((Context, SockAddr) -> IO ())
   -> ((Context, SockAddr) -> m ThreadId)
 useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
-    forkFinally (E.bracket_ (T.handshake ctx) (byeNoVanish ctx) (k conn))
+    forkFinally (E.bracket_ (T.handshake ctx) (byeTls ctx) (k conn))
                 (\eu -> T.contextClose ctx >> either E.throwIO return eu)
+
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -473,9 +475,10 @@ preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
 --------------------------------------------------------------------------------
 -- Internal utils
 
--- | Like 'T.bye', except it ignores 'Eg.ResourceVanished' exceptions.
-byeNoVanish :: Context -> IO ()
-byeNoVanish ctx =
+-- | Like 'T.bye' from the "Network.TLS" module, except it ignores 'ePIPE'
+-- errors which might happen if the remote peer closes the connection first.
+byeTls :: Context -> IO ()
+byeTls ctx = do
     E.catch (T.bye ctx) $ \e -> case e of
         Eg.IOError{ Eg.ioe_type  = Eg.ResourceVanished
                   , Eg.ioe_errno = Just ioe

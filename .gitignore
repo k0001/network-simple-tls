@@ -6,4 +6,8 @@ dist/
 *.swp
 *.swo
 *.swn
+*.o
+*.hi
 TAGS
+.cabal-sandbox/
+cabal.sandbox.config

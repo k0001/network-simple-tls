@@ -311,7 +311,7 @@ accept
                           -- TLS connection context and remote end address.
   -> m r
 accept ss lsock k = C.bracket (acceptTls ss lsock)
-                              (liftIO . T.contextClose . fst)
+                              (silentContextClose . fst)
                               (useTls k)
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -328,7 +328,7 @@ acceptFork
   -> m ThreadId
 acceptFork ss lsock k = liftIO $ do
     E.bracketOnError (acceptTls ss lsock)
-                     (T.contextClose . fst)
+                     (silentContextClose . fst)
                      (useTlsThenCloseFork k)
 
 --------------------------------------------------------------------------------
@@ -350,7 +350,7 @@ connect
                           -- connection context and remote end address.
   -> m r
 connect cs host port k = C.bracket (connectTls cs host port)
-                                   (liftIO . T.contextClose . fst)
+                                   (silentContextClose . fst)
                                    (useTls k)
 
 --------------------------------------------------------------------------------
@@ -414,8 +414,9 @@ acceptTls
   -> m (Context, SockAddr)
 acceptTls sp lsock = liftIO $ do
     (csock, caddr) <- NS.accept lsock
-    (`E.onException` S.closeSock csock) $ do
-        hnd <- NS.socketToHandle csock ReadWriteMode
+    hnd <- NS.socketToHandle csock ReadWriteMode
+               `E.onException` S.closeSock csock
+    (`E.onException` hClose hnd) $ do
         ctx <- makeServerContext sp hnd
         return (ctx, caddr)
 
@@ -446,8 +447,7 @@ useTlsThenClose
   :: (MonadIO m, C.MonadCatch m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
-useTlsThenClose k conn@(ctx,_) =
-    k conn `C.finally` liftIO (T.contextClose ctx)
+useTlsThenClose k conn@(ctx,_) = k conn `C.finally` silentContextClose ctx
 
 -- | Similar to 'useTlsThenClose', except it performs the all the IO actions
 -- in a new  thread.
@@ -460,7 +460,7 @@ useTlsThenCloseFork
   -> ((Context, SockAddr) -> m ThreadId)
 useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
     forkFinally (E.bracket_ (T.handshake ctx) (byeTls ctx) (k conn))
-                (\eu -> T.contextClose ctx >> either E.throwIO return eu)
+                (\eu -> silentContextClose ctx >> either E.throwIO return eu)
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -524,3 +524,10 @@ forkFinally :: IO a -> (Either E.SomeException a -> IO ()) -> IO ThreadId
 forkFinally action and_then =
     E.mask $ \restore ->
         forkIO $ E.try (restore action) >>= and_then
+
+-- | Like 'T.contextClose', except it swallows all 'IOError' exceptions.
+silentContextClose :: MonadIO m => Context -> m ()
+silentContextClose ctx = liftIO $ do
+    E.catch (T.contextClose ctx)
+            (\e -> let _ = e :: IOError in return ())
+

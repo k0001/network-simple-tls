@@ -311,7 +311,7 @@ accept
                           -- TLS connection context and remote end address.
   -> m r
 accept ss lsock k = C.bracket (acceptTls ss lsock)
-                              (silentClose . fst)
+                              (liftIO . silentClose . fst)
                               (useTls k)
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -350,7 +350,7 @@ connect
                           -- connection context and remote end address.
   -> m r
 connect cs host port k = C.bracket (connectTls cs host port)
-                                   (silentClose . fst)
+                                   (liftIO . silentClose . fst)
                                    (useTls k)
 
 --------------------------------------------------------------------------------
@@ -447,7 +447,7 @@ useTlsThenClose
   :: (MonadIO m, C.MonadCatch m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
-useTlsThenClose k conn@(ctx,_) = k conn `C.finally` silentClose ctx
+useTlsThenClose k conn@(ctx,_) = k conn `C.finally` liftIO (silentClose ctx)
 
 -- | Similar to 'useTlsThenClose', except it performs the all the IO actions
 -- in a new  thread.
@@ -515,8 +515,8 @@ forkFinally action and_then =
         forkIO $ E.try (restore action) >>= and_then
 
 -- | Like 'T.contextClose', except it swallows all 'IOError' exceptions.
-silentClose :: MonadIO m => Context -> m ()
-silentClose ctx = liftIO $ do
+silentClose :: Context -> IO ()
+silentClose ctx = do
     E.catch (T.contextClose ctx)
             (\e -> let _ = e :: IOError in return ())
 

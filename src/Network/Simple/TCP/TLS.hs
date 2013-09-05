@@ -439,7 +439,7 @@ useTls
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
 useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
-                                   (liftIO $ byeTls ctx)
+                                   (liftIO $ silentBye ctx)
                                    (k conn)
 
 -- | Like 'useTls', except it also fully closes the TCP connection when done.
@@ -459,7 +459,7 @@ useTlsThenCloseFork
   => ((Context, SockAddr) -> IO ())
   -> ((Context, SockAddr) -> m ThreadId)
 useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
-    forkFinally (E.bracket_ (T.handshake ctx) (byeTls ctx) (k conn))
+    forkFinally (E.bracket_ (T.handshake ctx) (silentBye ctx) (k conn))
                 (\eu -> silentContextClose ctx >> either E.throwIO return eu)
 
 --------------------------------------------------------------------------------
@@ -507,17 +507,6 @@ preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
 --------------------------------------------------------------------------------
 -- Internal utils
 
--- | Like 'T.bye' from the "Network.TLS" module, except it ignores 'ePIPE'
--- errors which might happen if the remote peer closes the connection first.
-byeTls :: Context -> IO ()
-byeTls ctx = do
-    E.catch (T.bye ctx) $ \e -> case e of
-        Eg.IOError{ Eg.ioe_type  = Eg.ResourceVanished
-                  , Eg.ioe_errno = Just ioe
-                  } | Errno ioe == ePIPE
-          -> return ()
-        _ -> E.throwIO e
-
 -- | 'Control.Concurrent.forkFinally' was introduced in base==4.6.0.0. We'll use
 -- our own version here for a while, until base==4.6.0.0 is widely establised.
 forkFinally :: IO a -> (Either E.SomeException a -> IO ()) -> IO ThreadId
@@ -530,4 +519,15 @@ silentContextClose :: MonadIO m => Context -> m ()
 silentContextClose ctx = liftIO $ do
     E.catch (T.contextClose ctx)
             (\e -> let _ = e :: IOError in return ())
+
+-- | Like 'T.bye' from the "Network.TLS" module, except it ignores 'ePIPE'
+-- errors which might happen if the remote peer closes the connection first.
+silentBye :: Context -> IO ()
+silentBye ctx = do
+    E.catch (T.bye ctx) $ \e -> case e of
+        Eg.IOError{ Eg.ioe_type  = Eg.ResourceVanished
+                  , Eg.ioe_errno = Just ioe
+                  } | Errno ioe == ePIPE
+          -> return ()
+        _ -> E.throwIO e
 

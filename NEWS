@@ -8,6 +8,10 @@
 * Generalize the `IO` monad by using `MonadIO` and `MonadCatch` (from
   the `exceptions` library).
 
+* Added `makeClientContext`, `makeServerContext` and `useTlsThenClose`.
+
+* Use `Socket` as a TLS backend instead of `Handle`.
+
 * Drop dependency on `monad-random-api` in favour of `monad-random`.
 
 * Dependency bumps.

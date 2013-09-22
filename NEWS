@@ -1,4 +1,4 @@
-# Version HEAD
+# Version 0.2.0
 
 * Re-export `Socket`, `SockAddr`, `HostName` and `ServiceName` from
   `Network.Socket` at `Network.Simple.TCP.TLS`.

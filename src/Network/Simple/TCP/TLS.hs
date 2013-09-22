@@ -80,11 +80,10 @@ import           Foreign.C.Error                 (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception                as Eg
 import qualified Network.Simple.TCP              as S
 import qualified Network.Socket                  as NS
+import qualified Network.Socket.ByteString       as NSB
 import qualified Network.TLS                     as T
 import           Network.TLS.Extra               as TE
 import           System.Certificate.X509         (getSystemCertificateStore)
-import           System.IO                       (IOMode(ReadWriteMode),
-                                                  Handle, hClose)
 
 --------------------------------------------------------------------------------
 
@@ -373,13 +372,12 @@ connectTls
   -> ServiceName          -- ^Service port to bind.
   -> m (Context, SockAddr)
 connectTls cs host port = liftIO $ do
-    E.mask $ \restore -> do
-        (sock, addr) <- S.connectSock host port
-        hnd <- restore (NS.socketToHandle sock ReadWriteMode)
-                            `E.onException` S.closeSock sock
-        (`E.onException` hClose hnd) $ restore $ do
-            ctx <- makeClientContext (updateClientParams up cs) hnd
-            return (ctx, addr)
+    E.bracketOnError
+        (S.connectSock host port)
+        (S.closeSock . fst)
+        (\(sock, addr) -> do
+             ctx <- makeClientContext (updateClientParams up cs) sock
+             return (ctx, addr))
   where
     up params =
         let certsCheck = [T.onCertificatesRecv params, return . checkHost]
@@ -389,11 +387,11 @@ connectTls cs host port = liftIO $ do
                            Just sni -> TE.certificateVerifyDomain sni
         in  params { T.onCertificatesRecv = TE.certificateChecks certsCheck }
 
--- | Make a client-side TLS 'Context' for the given settings, on top of the given
--- handle underlying the TCP connection to the remote end.
-makeClientContext :: MonadIO m => ClientSettings -> Handle -> m Context
-makeClientContext (ClientSettings params) hnd = liftIO $ do
-    T.contextNewOnHandle hnd params =<< AESCtr.makeSystem
+-- | Make a client-side TLS 'Context' for the given settings, on top of the
+-- given TCP `Socket` connected to the remote end.
+makeClientContext :: MonadIO m => ClientSettings -> Socket -> m Context
+makeClientContext (ClientSettings params) sock = liftIO $ do
+    T.contextNew (socketBackend sock) params =<< AESCtr.makeSystem
 
 --------------------------------------------------------------------------------
 
@@ -414,19 +412,18 @@ acceptTls
   -> Socket           -- ^Listening and bound socket.
   -> m (Context, SockAddr)
 acceptTls sp lsock = liftIO $ do
-    E.mask $ \restore -> do
-        (csock, caddr) <- NS.accept lsock
-        hnd <- restore (NS.socketToHandle csock ReadWriteMode)
-                            `E.onException` S.closeSock csock
-        (`E.onException` hClose hnd) $ restore $ do
-            ctx <- makeServerContext sp hnd
-            return (ctx, caddr)
+    E.bracketOnError
+        (NS.accept lsock)
+        (S.closeSock . fst)
+        (\(sock, addr) -> do
+             ctx <- makeServerContext sp sock
+             return (ctx, addr))
 
 -- | Make a server-side TLS 'Context' for the given settings, on top of the
--- given handle underlying the TCP connection to the remote end.
-makeServerContext :: MonadIO m => ServerSettings -> Handle -> m Context
-makeServerContext (ServerSettings params) hnd = liftIO $ do
-    T.contextNewOnHandle hnd params =<< AESCtr.makeSystem
+-- given TCP `Socket` connected to the remote end.
+makeServerContext :: MonadIO m => ServerSettings -> Socket -> m Context
+makeServerContext (ServerSettings params) sock = liftIO $ do
+    T.contextNew (socketBackend sock) params =<< AESCtr.makeSystem
 
 --------------------------------------------------------------------------------
 
@@ -528,3 +525,7 @@ silentBye ctx = do
           -> return ()
         _ -> E.throwIO e
 
+-- | Makes an TLS context `T.Backend` from a `Socket`.
+socketBackend :: Socket -> T.Backend
+socketBackend sock = do
+    T.Backend (return ()) (S.closeSock sock) (NSB.sendAll sock) (NSB.recv sock)

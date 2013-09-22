@@ -311,7 +311,7 @@ accept
                           -- TLS connection context and remote end address.
   -> m r
 accept ss lsock k = C.bracket (acceptTls ss lsock)
-                              (liftIO . silentClose . fst)
+                              (liftIO . T.contextClose . fst)
                               (useTls k)
 
 -- | Like 'accept', except it uses a different thread to performs the TLS
@@ -328,7 +328,7 @@ acceptFork
   -> m ThreadId
 acceptFork ss lsock k = liftIO $ do
     E.bracketOnError (acceptTls ss lsock)
-                     (silentClose . fst)
+                     (T.contextClose . fst)
                      (useTlsThenCloseFork k)
 
 --------------------------------------------------------------------------------
@@ -350,7 +350,7 @@ connect
                           -- connection context and remote end address.
   -> m r
 connect cs host port k = C.bracket (connectTls cs host port)
-                                   (liftIO . silentClose . fst)
+                                   (liftIO . T.contextClose . fst)
                                    (useTls k)
 
 --------------------------------------------------------------------------------
@@ -373,12 +373,13 @@ connectTls
   -> ServiceName          -- ^Service port to bind.
   -> m (Context, SockAddr)
 connectTls cs host port = liftIO $ do
-    (sock, addr) <- S.connectSock host port
-    hnd <- NS.socketToHandle sock ReadWriteMode
-               `E.onException` S.closeSock sock
-    (`E.onException` hClose hnd) $ do
-        ctx <- makeClientContext (updateClientParams up cs) hnd
-        return (ctx, addr)
+    E.mask $ \restore -> do
+        (sock, addr) <- S.connectSock host port
+        hnd <- restore (NS.socketToHandle sock ReadWriteMode)
+                            `E.onException` S.closeSock sock
+        (`E.onException` hClose hnd) $ restore $ do
+            ctx <- makeClientContext (updateClientParams up cs) hnd
+            return (ctx, addr)
   where
     up params =
         let certsCheck = [T.onCertificatesRecv params, return . checkHost]
@@ -413,15 +414,16 @@ acceptTls
   -> Socket           -- ^Listening and bound socket.
   -> m (Context, SockAddr)
 acceptTls sp lsock = liftIO $ do
-    (csock, caddr) <- NS.accept lsock
-    hnd <- NS.socketToHandle csock ReadWriteMode
-               `E.onException` S.closeSock csock
-    (`E.onException` hClose hnd) $ do
-        ctx <- makeServerContext sp hnd
-        return (ctx, caddr)
+    E.mask $ \restore -> do
+        (csock, caddr) <- NS.accept lsock
+        hnd <- restore (NS.socketToHandle csock ReadWriteMode)
+                            `E.onException` S.closeSock csock
+        (`E.onException` hClose hnd) $ restore $ do
+            ctx <- makeServerContext sp hnd
+            return (ctx, caddr)
 
--- | Make a server-side TLS 'Context' for the given settings, on top of the given
--- handle underlying the TCP connection to the remote end.
+-- | Make a server-side TLS 'Context' for the given settings, on top of the
+-- given handle underlying the TCP connection to the remote end.
 makeServerContext :: MonadIO m => ServerSettings -> Handle -> m Context
 makeServerContext (ServerSettings params) hnd = liftIO $ do
     T.contextNewOnHandle hnd params =<< AESCtr.makeSystem
@@ -429,7 +431,7 @@ makeServerContext (ServerSettings params) hnd = liftIO $ do
 --------------------------------------------------------------------------------
 
 -- | Perform a TLS handshake on the given 'Context', then perform the
--- given action and at last gracefully close the TLS session
+-- given action and at last gracefully close the TLS session using `T.bye`.
 --
 -- This function does not close the underlying TCP connection when done.
 -- Prefer to use `useTlsThenClose` or `useTlsThenCloseFork` if you need that
@@ -447,7 +449,8 @@ useTlsThenClose
   :: (MonadIO m, C.MonadCatch m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
-useTlsThenClose k conn@(ctx,_) = k conn `C.finally` liftIO (silentClose ctx)
+useTlsThenClose k conn@(ctx,_) = do
+    useTls k conn `C.finally` liftIO (T.contextClose ctx)
 
 -- | Similar to 'useTlsThenClose', except it performs the all the IO actions
 -- in a new  thread.
@@ -460,7 +463,7 @@ useTlsThenCloseFork
   -> ((Context, SockAddr) -> m ThreadId)
 useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
     forkFinally (E.bracket_ (T.handshake ctx) (silentBye ctx) (k conn))
-                (\eu -> silentClose ctx >> either E.throwIO return eu)
+                (\eu -> T.contextClose ctx >> either E.throwIO return eu)
 
 --------------------------------------------------------------------------------
 -- Utils
@@ -482,7 +485,7 @@ recv ctx = liftIO $ do
 -- | Encrypts the given strict 'B.ByteString' and sends it through the
 -- 'Context'.
 send :: MonadIO m => Context -> B.ByteString -> m ()
-send ctx bs = T.sendData ctx (BL.fromChunks [bs])
+send ctx = \bs -> T.sendData ctx (BL.fromChunks [bs])
 {-# INLINABLE send #-}
 
 --------------------------------------------------------------------------------
@@ -513,12 +516,6 @@ forkFinally :: IO a -> (Either E.SomeException a -> IO ()) -> IO ThreadId
 forkFinally action and_then =
     E.mask $ \restore ->
         forkIO $ E.try (restore action) >>= and_then
-
--- | Like 'T.contextClose', except it swallows all 'IOError' exceptions.
-silentClose :: Context -> IO ()
-silentClose ctx = do
-    E.catch (T.contextClose ctx)
-            (\e -> let _ = e :: IOError in return ())
 
 -- | Like 'T.bye' from the "Network.TLS" module, except it ignores 'ePIPE'
 -- errors which might happen if the remote peer closes the connection first.

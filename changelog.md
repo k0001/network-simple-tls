@@ -1,4 +1,4 @@
-# Version HEAD
+# Version 0.2.1
 
 * Ensure that the Socket TLS backend always receive the expected number
   of bytes. This issue showed up as the following exception previously:

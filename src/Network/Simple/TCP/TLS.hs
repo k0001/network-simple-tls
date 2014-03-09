@@ -528,4 +528,10 @@ silentBye ctx = do
 -- | Makes an TLS context `T.Backend` from a `Socket`.
 socketBackend :: Socket -> T.Backend
 socketBackend sock = do
-    T.Backend (return ()) (S.closeSock sock) (NSB.sendAll sock) (NSB.recv sock)
+    T.Backend (return ()) (S.closeSock sock) (NSB.sendAll sock) recvAll
+  where
+    recvAll = step B.empty
+       where step !acc 0 = return acc
+             step !acc n = do
+                bs <- NSB.recv sock n
+                step (acc `B.append` bs) (n - B.length bs)

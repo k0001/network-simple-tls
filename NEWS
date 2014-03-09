@@ -1,3 +1,11 @@
+# Version HEAD
+
+* Ensure that the Socket TLS backend always receive the expected number
+  of bytes. This issue showed up as the following exception previously:
+
+      Error_Packet "partial packet: expecting 100 bytes, got: 6"
+
+
 # Version 0.2.0
 
 * Re-export `Socket`, `SockAddr`, `HostName` and `ServiceName` from

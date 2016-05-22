@@ -1,4 +1,6 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns    #-}
 
 -- | This module exports simple tools for establishing TLS-secured TCP
 -- connections, relevant to both the client side and server side of the
@@ -36,10 +38,6 @@ module Network.Simple.TCP.TLS (
   , updateClientParams
   , clientParams
 
-  -- * Credentials
-  , Credential(Credential)
-  , credentialToCertList
-
   -- * Utils
   , recv
   , send
@@ -61,35 +59,38 @@ module Network.Simple.TCP.TLS (
   , module Network.Simple.TCP
   , module Network.Socket
   , module Network.TLS
+  , T.Credentials
   ) where
 
 
-import           Control.Concurrent              (ThreadId, forkIO)
-import qualified Control.Exception               as E
+import           Control.Applicative ((<|>))
+import           Control.Concurrent (ThreadId, forkIO)
+import qualified Control.Exception as E
 import           Control.Monad
-import qualified Control.Monad.Catch             as C
-import           Control.Monad.IO.Class          (MonadIO(liftIO))
-import qualified Crypto.Random.AESCtr            as AESCtr
-import qualified Data.ByteString                 as B
-import qualified Data.ByteString.Lazy            as BL
-import qualified Data.Certificate.X509           as X
-import qualified Data.CertificateStore           as C
-import           Data.Maybe                      (listToMaybe)
-import           Data.List                       (intersect)
-import           Foreign.C.Error                 (Errno(Errno), ePIPE)
-import qualified GHC.IO.Exception                as Eg
-import qualified Network.Simple.TCP              as S
-import qualified Network.Socket                  as NS
-import qualified Network.Socket.ByteString       as NSB
-import qualified Network.TLS                     as T
-import           Network.TLS.Extra               as TE
-import           System.Certificate.X509         (getSystemCertificateStore)
+import qualified Control.Monad.Catch as C
+import           Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
+import           Data.Default (def)
+import           Data.List (intersect)
+import           Data.Maybe (listToMaybe)
+import qualified Data.X509 as X
+import qualified Data.X509.CertificateStore as X
+import qualified Data.X509.Validation as X
+import           Foreign.C.Error (Errno(Errno), ePIPE)
+import qualified GHC.IO.Exception as Eg
+import qualified Network.Simple.TCP as S
+import qualified Network.Socket as NS
+import qualified Network.Socket.ByteString as NSB
+import qualified Network.TLS as T
+import           Network.TLS.Extra as TE
+import           System.X509 (getSystemCertificateStore)
 
 --------------------------------------------------------------------------------
 
-import Network.Simple.TCP (HostPreference(Host, HostAny, HostIPv4, HostIPv6))
-import Network.Socket     (HostName, ServiceName, Socket, SockAddr)
-import Network.TLS        (Context)
+import           Network.Simple.TCP (HostPreference(Host, HostAny, HostIPv4, HostIPv6))
+import           Network.Socket (HostName, ServiceName, Socket, SockAddr)
+import           Network.TLS (Context)
 
 -- $exports
 --
@@ -104,94 +105,83 @@ import Network.TLS        (Context)
 -- [From "Network.TLS"] 'Context'.
 
 --------------------------------------------------------------------------------
-
--- | Primary certificate, private key and the rest of the certificate chain.
-data Credential = Credential !X.X509 !T.PrivateKey [X.X509]
-  deriving (Show)
-
--- | Convert client `Credential` to the format expected by 'T.pCertificates'.
-credentialToCertList :: Credential -> [(X.X509, Maybe T.PrivateKey)]
-credentialToCertList (Credential c pk xs) =
-    (c, Just pk) : fmap (\x -> (x, Nothing)) xs
-
---------------------------------------------------------------------------------
 -- Client side TLS settings
 
 -- | Abstract type representing the configuration settings for a TLS client.
 --
 -- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain your
 -- 'ClientSettings' value.
-data ClientSettings = ClientSettings { unClientSettings :: T.Params }
+data ClientSettings = ClientSettings { unClientSettings :: T.ClientParams }
 
 -- | Get the system default 'ClientSettings'.
 --
 -- See 'makeClientSettings' for the for the default TLS settings used.
-getDefaultClientSettings :: MonadIO m => m ClientSettings
-getDefaultClientSettings = liftIO $ do
-    makeClientSettings [] Nothing `fmap` getSystemCertificateStore
+getDefaultClientSettings :: MonadIO m =>
+                            (HostName, B.ByteString) -> m ClientSettings
+getDefaultClientSettings sid = liftIO $ do
+    makeClientSettings sid (T.Credentials []) False (const True) `fmap`
+      getSystemCertificateStore
 
 -- | Make defaults 'ClientSettings'.
 --
--- The following TLS settings are used by default:
---
--- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
---
--- [Version reported during /ClientHello/] 'T.TLS10'.
+-- Initial credentials can be loaded with 'T.credentialLoadX509'
 --
 -- [Supported cipher suites] In decreasing order of preference:
--- 'TE.cipher_AES256_SHA256',
--- 'TE.cipher_AES256_SHA1',
--- 'TE.cipher_AES128_SHA256',
--- 'TE.cipher_AES128_SHA1',
--- 'TE.cipher_RC4_128_SHA1',
--- 'TE.cipher_RC4_128_MD5'.
+-- 'TE.cipher_ECDHE_RSA_AES128GCM_SHA256'
+-- 'TE.cipher_ECDHE_ECDSA_AES128GCM_SHA256'
+-- 'TE.cipher_DHE_RSA_AES256_SHA256'
+-- 'TE.cipher_AES256_SHA256'
+-- 'TE.cipher_AES256_SHA1'
+-- 'TE.cipher_RC4_128_MD5'
+-- 'TE.cipher_RC4_128_SHA1'
 makeClientSettings
-  :: [Credential]        -- ^Credentials to provide to the server, if requested.
-                         -- The first one is used in case we can't choose one
-                         -- based on information provided by the server.
-  -> Maybe HostName      -- ^Explicit Server Name Identification (SNI).
-  -> C.CertificateStore  -- ^CAs used to verify the server certificate.
-                         -- Use 'getSystemCertificateStore' to obtain
-                         -- the operating system's defaults.
+  :: (HostName, B.ByteString)       -- ^Server DN and extra service identification blob.
+  -> T.Credentials                  -- ^Credentials to provide to the server, if requested.
+                                    -- The first one is used in case we can't choose one
+                                    -- based on information provided by the server.
+  -> Bool                           -- ^Explicit Server Name Identification (SNI).
+  -> (X.FailedReason -> Bool)       -- ^Filter certificate validation errors to achieve desired
+                                    -- level of security
+  -> X.CertificateStore             -- ^CAs used to verify the server certificate.
+                                    -- Use 'getSystemCertificateStore' to obtain
+                                    -- the operating system's defaults.
   -> ClientSettings
-makeClientSettings creds msni cStore =
-    ClientSettings . T.updateClientParams modClientParams
-                   . modParamsCore
-                   $ T.defaultParamsClient
+makeClientSettings sid (T.Credentials creds) useSNI certificateVerifyFilter cStore =
+    ClientSettings . modClientParams $ uncurry T.defaultParamsClient sid
   where
-    modParamsCore p = p
-      { T.pConnectVersion      = T.TLS10
-      , T.pAllowedVersions     = [T.TLS12, T.TLS11, T.TLS10]
-      , T.pCiphers             = ciphers_AES_CBC ++ ciphers_RC4
-      , T.pUseSession          = True
-      , T.pCertificates        = []
-      , T.onCertificatesRecv   = TE.certificateVerifyChain cStore }
-    modClientParams cp = cp
-      { T.onCertificateRequest =
-            return . maybe firstCerts credentialToCertList . findCredential
-      , T.clientUseServerName  = msni }
-
+    modClientParams p = p {
+      T.clientUseServerNameIndication  = useSNI
+      , T.clientSupported = def {
+        T.supportedCiphers = TE.ciphersuite_strong ++ TE.ciphersuite_medium
+        }
+      , T.clientHooks = def {
+        T.onServerCertificate = certificateVerifyChain
+        , T.onCertificateRequest = return . findCredential
+        }
+      , T.clientShared =  def {
+        T.sharedCAStore = cStore
+        }
+      }
+    certificateVerifyChain c v s ch = do
+      errs <- X.validateDefault c v s ch
+      return $ filter certificateVerifyFilter errs
     -- | Find the first Credential that matches the given requirements.
     -- Currently, the only requirement considered is the subject DN.
-    findCredential (_, _, dns) = listToMaybe (filter isSubject creds)
+    findCredential (_, _, dns) =
+      mcred <|> error "makeClientSettings: no Credential given but server requested one"
       where
-        isSubject (Credential c _ _) = X.certSubjectDN (X.x509Cert c) `elem` dns
+        mcred = listToMaybe $ (filter isSubject creds) ++ creds
+        isSubject (X.CertificateChain cc, _) =
+          any (\c -> (X.certSubjectDN . X.getCertificate) c `elem` dns) cc
 
-    firstCerts =
-      case creds of
-        (c:_) -> credentialToCertList c
-        []    -> error "makeClientSettings:\
-                       \ no Credential given but server requested one"
-
-
--- | Update advanced TLS client configuration 'T.Params'.
+-- | Update advanced TLS client configuration 'T.ClientParams'.
 -- See the "Network.TLS" module for details.
-updateClientParams :: (T.Params -> T.Params) -> ClientSettings -> ClientSettings
+updateClientParams :: (T.ClientParams -> T.ClientParams) -> ClientSettings -> ClientSettings
 updateClientParams f = ClientSettings . f . unClientSettings
 
--- | A 'Control.Lens.Lens' into the TLS client configuration 'T.Params'.
+-- | A 'Control.Lens.Lens' into the TLS client configuration 'T.ClientParams'.
 -- See the "Network.TLS" and the @lens@ package for details.
-clientParams :: Functor f => (T.Params -> f T.Params)
+clientParams :: Functor f => (T.ClientParams -> f T.ClientParams)
              -> (ClientSettings -> f ClientSettings)
 clientParams f = fmap ClientSettings . f . unClientSettings
 
@@ -202,13 +192,11 @@ clientParams f = fmap ClientSettings . f . unClientSettings
 --
 -- Use 'makeServerSettings' to obtain your 'ServerSettings' value, and
 -- 'updateServerParams' to update it.
-data ServerSettings = ServerSettings { unServerSettings :: T.Params }
+data ServerSettings = ServerSettings { unServerSettings :: T.ServerParams }
 
 -- | Make default 'ServerSettings'.
 --
--- The following TLS settings are used by default:
---
--- [Supported versions] 'T.TLS10', 'T.TLS11', 'T.TLS12'.
+-- Initial credentials can be loaded with 'T.credentialLoadX509'
 --
 -- [Supported cipher suites for 'T.TLS10']
 -- In decreasing order of preference:
@@ -228,41 +216,56 @@ data ServerSettings = ServerSettings { unServerSettings :: T.Params }
 -- 'TE.cipher_AES128_SHA1'.
 -- The cipher suite preferred by the client is used.
 makeServerSettings
-  :: Credential               -- ^Server credential.
-  -> Maybe C.CertificateStore -- ^CAs used to verify the client certificate. If
+  :: T.Credentials            -- ^Server credential.
+  -> (X.FailedReason -> Bool) -- ^Filter client certificate validation errors to achieve desired
+                              -- level of security
+
+  -> Maybe X.CertificateStore -- ^CAs used to verify the client certificate. If
                               -- specified, then a valid client certificate will
                               -- be expected during on handshake.
   -> ServerSettings
-makeServerSettings creds mcStore =
-    ServerSettings . T.updateServerParams modServerParams
-                   . modParamsCore
-                   $ T.defaultParamsServer
+makeServerSettings creds certificateVerifyFilter mcStore =
+  ServerSettings $ modServerParams def
   where
-    modParamsCore p = p
-      { T.pConnectVersion      = T.TLS10
-      , T.pAllowedVersions     = [T.TLS12, T.TLS11, T.TLS10]
-      , T.pCiphers             = ciphers_AES_CBC ++ ciphers_RC4
-      , T.pUseSession          = True
-      , T.pCertificates        = credentialToCertList creds }
-    modServerParams sp = sp
-      { T.serverWantClientCert = maybe False (const True) mcStore
-      , T.onClientCertificate  = clientCertsCheck
-      , T.onCipherChoosing     = chooseCipher
-      , T.serverCACertificates = maybe [] C.listCertificates mcStore }
+    modServerParams p = p {
+      T.serverWantClientCert = maybe False (const True) mcStore
+      , T.serverCACertificates = maybe [] X.listCertificates mcStore
+
+      , T.serverSupported = def {
+        T.supportedCiphers = TE.ciphersuite_strong ++ TE.ciphersuite_medium
+        , T.supportedSession = True
+        }
+
+      , T.serverShared = def {
+        T.sharedCredentials = creds
+        }
+
+      , T.serverHooks = def {
+        T.onClientCertificate  = clientCertsCheck
+        , T.onCipherChoosing   = chooseCipher
+        }
+      }
+
     clientCertsCheck certs = case mcStore of
       Nothing -> return T.CertificateUsageAccept
-      Just cs -> TE.certificateVerifyChain cs certs
+      Just cs -> do
+        errs <- X.validateDefault cs def ("", "") certs
+        case filter certificateVerifyFilter errs of
+          [] ->
+            return T.CertificateUsageAccept
+          _ ->
+            T.onClientCertificate def certs
     -- | Ciphers prefered by the client take precedence.
     chooseCipher v cCiphs = head (intersect cCiphs (preferredCiphers v))
 
 -- | Update advanced TLS server configuration 'T.Params'.
 -- See the "Network.TLS" module for details.
-updateServerParams :: (T.Params -> T.Params) -> ServerSettings -> ServerSettings
+updateServerParams :: (T.ServerParams -> T.ServerParams) -> ServerSettings -> ServerSettings
 updateServerParams f = ServerSettings . f . unServerSettings
 
 -- | A 'Control.Lens.Lens' into the TLS server configuration 'T.Params'.
 -- See the "Network.TLS" and the @lens@ package for details.
-serverParams :: Functor f => (T.Params -> f T.Params)
+serverParams :: Functor f => (T.ServerParams -> f T.ServerParams)
              -> (ServerSettings -> f ServerSettings)
 serverParams f = fmap ServerSettings . f . unServerSettings
 
@@ -300,7 +303,7 @@ serve ss hp port k = liftIO $ do
 -- in case of exceptions. If you need to manage the lifetime of the connection
 -- resources yourself, then use 'acceptTls' instead.
 accept
-  :: (MonadIO m, C.MonadCatch m)
+  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
   => ServerSettings       -- ^TLS settings.
   -> Socket               -- ^Listening and bound socket.
   -> ((Context, SockAddr) -> m r)
@@ -339,7 +342,7 @@ acceptFork ss lsock k = liftIO $ do
 -- in case of exceptions. If you need to manage the lifetime of the connection
 -- resources yourself, then use 'connectTls' instead.
 connect
-  :: (MonadIO m, C.MonadCatch m)
+  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
   => ClientSettings       -- ^TLS settings.
   -> HostName             -- ^Server hostname.
   -> ServiceName          -- ^Server service port.
@@ -376,22 +379,14 @@ connectTls cs host port = liftIO $ do
         (S.connectSock host port)
         (S.closeSock . fst)
         (\(sock, addr) -> do
-             ctx <- makeClientContext (updateClientParams up cs) sock
+             ctx <- makeClientContext cs sock
              return (ctx, addr))
-  where
-    up params =
-        let certsCheck = [T.onCertificatesRecv params, return . checkHost]
-            checkHost  = let T.Client cparams = T.roleParams params in
-                         case T.clientUseServerName cparams of
-                           Nothing  -> TE.certificateVerifyDomain host
-                           Just sni -> TE.certificateVerifyDomain sni
-        in  params { T.onCertificatesRecv = TE.certificateChecks certsCheck }
 
 -- | Make a client-side TLS 'Context' for the given settings, on top of the
 -- given TCP `Socket` connected to the remote end.
 makeClientContext :: MonadIO m => ClientSettings -> Socket -> m Context
 makeClientContext (ClientSettings params) sock = liftIO $ do
-    T.contextNew (socketBackend sock) params =<< AESCtr.makeSystem
+    T.contextNew (socketBackend sock) params
 
 --------------------------------------------------------------------------------
 
@@ -423,7 +418,7 @@ acceptTls sp lsock = liftIO $ do
 -- given TCP `Socket` connected to the remote end.
 makeServerContext :: MonadIO m => ServerSettings -> Socket -> m Context
 makeServerContext (ServerSettings params) sock = liftIO $ do
-    T.contextNew (socketBackend sock) params =<< AESCtr.makeSystem
+    T.contextNew (socketBackend sock) params
 
 --------------------------------------------------------------------------------
 
@@ -434,7 +429,7 @@ makeServerContext (ServerSettings params) sock = liftIO $ do
 -- Prefer to use `useTlsThenClose` or `useTlsThenCloseFork` if you need that
 -- behavior. Otherwise, you must call `T.contextClose` yourself at some point.
 useTls
-  :: (MonadIO m, C.MonadCatch m)
+  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
 useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
@@ -443,7 +438,7 @@ useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
 
 -- | Like 'useTls', except it also fully closes the TCP connection when done.
 useTlsThenClose
-  :: (MonadIO m, C.MonadCatch m)
+  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
 useTlsThenClose k conn@(ctx,_) = do
@@ -487,21 +482,10 @@ send ctx = \bs -> T.sendData ctx (BL.fromChunks [bs])
 
 --------------------------------------------------------------------------------
 -- Internal: Default ciphers
-
-ciphers_RC4 :: [T.Cipher]
-ciphers_RC4 = [ TE.cipher_RC4_128_SHA1
-              , TE.cipher_RC4_128_MD5 ]
-
-ciphers_AES_CBC :: [T.Cipher]
-ciphers_AES_CBC = [ TE.cipher_AES256_SHA256
-                  , TE.cipher_AES256_SHA1
-                  , TE.cipher_AES128_SHA256
-                  , TE.cipher_AES128_SHA1 ]
-
 preferredCiphers :: T.Version -> [T.Cipher]
-preferredCiphers T.TLS12 = ciphers_AES_CBC
-preferredCiphers T.TLS11 = ciphers_AES_CBC
-preferredCiphers T.TLS10 = ciphers_AES_CBC ++ ciphers_RC4
+preferredCiphers T.TLS12 = TE.ciphersuite_strong
+preferredCiphers T.TLS11 = TE.ciphersuite_strong
+preferredCiphers T.TLS10 = TE.ciphersuite_strong ++ TE.ciphersuite_medium
 preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
 
 --------------------------------------------------------------------------------

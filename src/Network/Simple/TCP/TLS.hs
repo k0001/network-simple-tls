@@ -1,6 +1,6 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns    #-}
 
 -- | This module exports simple tools for establishing TLS-secured TCP
 -- connections, relevant to both the client side and server side of the
@@ -54,8 +54,8 @@ module Network.Simple.TCP.TLS (
   -- * Note to Windows users
   , NS.withSocketsDo
 
-  -- * Exports
-  -- $exports
+  -- * Re-exports
+  -- $reexports
   , module Network.Simple.TCP
   , module Network.Socket
   , module Network.TLS
@@ -63,8 +63,7 @@ module Network.Simple.TCP.TLS (
   ) where
 
 
-import           Control.Applicative ((<|>))
-import           Control.Concurrent (ThreadId, forkIO)
+import           Control.Concurrent (ThreadId, forkFinally)
 import qualified Control.Exception as E
 import           Control.Monad
 import qualified Control.Monad.Catch as C
@@ -73,26 +72,26 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import           Data.Default (def)
 import           Data.List (intersect)
-import           Data.Maybe (listToMaybe)
+import           Data.Maybe (isJust, listToMaybe)
 import qualified Data.X509 as X
 import qualified Data.X509.CertificateStore as X
 import qualified Data.X509.Validation as X
 import           Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as Eg
 import qualified Network.Simple.TCP as S
+import           Network.Simple.TCP (HostPreference(Host, HostAny, HostIPv4, HostIPv6))
+import           Network.Socket (HostName, ServiceName, Socket, SockAddr)
 import qualified Network.Socket as NS
 import qualified Network.Socket.ByteString as NSB
 import qualified Network.TLS as T
+import           Network.TLS (Context)
 import           Network.TLS.Extra as TE
 import           System.X509 (getSystemCertificateStore)
 
 --------------------------------------------------------------------------------
 
-import           Network.Simple.TCP (HostPreference(Host, HostAny, HostIPv4, HostIPv6))
-import           Network.Socket (HostName, ServiceName, Socket, SockAddr)
-import           Network.TLS (Context)
 
--- $exports
+-- $reexports
 --
 -- For your convenience, this module module also re-exports the following types
 -- from other modules:
@@ -109,80 +108,103 @@ import           Network.TLS (Context)
 
 -- | Abstract type representing the configuration settings for a TLS client.
 --
--- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain your
+-- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain a
 -- 'ClientSettings' value.
 data ClientSettings = ClientSettings { unClientSettings :: T.ClientParams }
 
--- | Get the system default 'ClientSettings'.
+-- | Get the system default 'ClientSettings' for a particular 'X.ServiceID'.
 --
--- See 'makeClientSettings' for the for the default TLS settings used.
-getDefaultClientSettings :: MonadIO m =>
-                            (HostName, B.ByteString) -> m ClientSettings
+-- Defaults: No client credentials, system certificate store.
+--
+-- See 'makeClientSettings' to better understand the default settings used.
+getDefaultClientSettings :: MonadIO m => X.ServiceID -> m ClientSettings
 getDefaultClientSettings sid = liftIO $ do
-    makeClientSettings sid (T.Credentials []) False (const True) `fmap`
-      getSystemCertificateStore
+  makeClientSettings sid (T.Credentials []) <$> getSystemCertificateStore
+
 
 -- | Make defaults 'ClientSettings'.
 --
--- Initial credentials can be loaded with 'T.credentialLoadX509'
+-- Certificate chain validation is done by 'X.validateDefault' from the
+-- "Data.X509.Validation" module.
 --
--- [Supported cipher suites] In decreasing order of preference:
--- 'TE.cipher_ECDHE_RSA_AES128GCM_SHA256'
--- 'TE.cipher_ECDHE_ECDSA_AES128GCM_SHA256'
--- 'TE.cipher_DHE_RSA_AES256_SHA256'
--- 'TE.cipher_AES256_SHA256'
--- 'TE.cipher_AES256_SHA1'
--- 'TE.cipher_RC4_128_MD5'
--- 'TE.cipher_RC4_128_SHA1'
+-- The Server Name Indication (SNI) TLS extension is enabled.
+--
+-- The supported cipher suites are those enumerated by 'TE.ciphersuite_default',
+-- in decreasing order of preference.
+--
+-- Secure renegotiation is enabled.
+--
+-- Only the __TLS 1.1__ and __TLS 1.2__ protocols are supported by default.
+--
+-- If you are unsatisfied with any of these settings, use 'updateClientParams'
+-- to change them.
 makeClientSettings
-  :: (HostName, B.ByteString)       -- ^Server DN and extra service identification blob.
-  -> T.Credentials                  -- ^Credentials to provide to the server, if requested.
-                                    -- The first one is used in case we can't choose one
-                                    -- based on information provided by the server.
-  -> Bool                           -- ^Explicit Server Name Identification (SNI).
-  -> (X.FailedReason -> Bool)       -- ^Filter certificate validation errors to achieve desired
-                                    -- level of security
-  -> X.CertificateStore             -- ^CAs used to verify the server certificate.
-                                    -- Use 'getSystemCertificateStore' to obtain
-                                    -- the operating system's defaults.
+  :: X.ServiceID
+  -- ^ @
+  -- 'X.ServiceID' ~ ('HostName', 'B.ByteString')
+  -- @
+  --
+  -- Identification of the connection consisting of the fully qualified host
+  -- name for the server (e.g. www.example.com) and an optional suffix.
+  --
+  -- It is important that the hostname part is properly filled for security
+  -- reasons, as it allow to properly associate the remote side with the given
+  -- certificate during a handshake.
+  --
+  -- The suffix is used to identity a certificate per service on a specific
+  -- host. For example, a same host might have different certificates on
+  -- differents ports (443 and 995). For TCP connections, it's recommended
+  -- to use: @:port@, or @:service@ for the blob (e.g., \@":443"@, @\":https"@).
+  -> T.Credentials
+  -- ^ Credentials to provide to the server if requested. Only credentials
+  -- matching the server's 'X.DistinguishedName' will be submitted.
+  --
+  -- Initial credentials can be loaded with 'T.credentialLoadX509'
+  -> X.CertificateStore
+  -- ^ CAs used to verify the server certificate.
+  --
+  -- Use 'getSystemCertificateStore' to obtain the operating system's defaults.
   -> ClientSettings
-makeClientSettings sid (T.Credentials creds) useSNI certificateVerifyFilter cStore =
-    ClientSettings . modClientParams $ uncurry T.defaultParamsClient sid
-  where
-    modClientParams p = p {
-      T.clientUseServerNameIndication  = useSNI
-      , T.clientSupported = def {
-        T.supportedCiphers = TE.ciphersuite_strong ++ TE.ciphersuite_medium
-        }
-      , T.clientHooks = def {
-        T.onServerCertificate = certificateVerifyChain
-        , T.onCertificateRequest = return . findCredential
-        }
-      , T.clientShared =  def {
-        T.sharedCAStore = cStore
-        }
+makeClientSettings (hn, sp) (T.Credentials creds) cStore =
+    ClientSettings $ (T.defaultParamsClient hn sp)
+      { T.clientUseServerNameIndication = True
+      , T.clientSupported = def
+        { T.supportedVersions = [T.TLS12, T.TLS11]
+        , T.supportedCiphers = TE.ciphersuite_default
+        , T.supportedSecureRenegotiation = True
+        , T.supportedClientInitiatedRenegotiation = True }
+      , T.clientShared = def { T.sharedCAStore = cStore }
+      , T.clientHooks = def
+        { T.onServerCertificate = X.validateDefault
+        , T.onCertificateRequest = pure . findCredential }
       }
-    certificateVerifyChain c v s ch = do
-      errs <- X.validateDefault c v s ch
-      return $ filter certificateVerifyFilter errs
+  where
     -- | Find the first Credential that matches the given requirements.
     -- Currently, the only requirement considered is the subject DN.
-    findCredential (_, _, dns) =
-      mcred <|> error "makeClientSettings: no Credential given but server requested one"
+    findCredential
+      :: ([T.CertificateType],
+          Maybe [T.HashAndSignatureAlgorithm],
+          [X.DistinguishedName])
+      -> Maybe (X.CertificateChain, X.PrivKey)
+    findCredential (_, _, dns) = listToMaybe (filter isSubject creds)
       where
-        mcred = listToMaybe $ (filter isSubject creds) ++ creds
         isSubject (X.CertificateChain cc, _) =
           any (\c -> (X.certSubjectDN . X.getCertificate) c `elem` dns) cc
 
 -- | Update advanced TLS client configuration 'T.ClientParams'.
+--
 -- See the "Network.TLS" module for details.
-updateClientParams :: (T.ClientParams -> T.ClientParams) -> ClientSettings -> ClientSettings
+updateClientParams
+  :: (T.ClientParams -> T.ClientParams) -> ClientSettings -> ClientSettings
 updateClientParams f = ClientSettings . f . unClientSettings
 
 -- | A 'Control.Lens.Lens' into the TLS client configuration 'T.ClientParams'.
+--
 -- See the "Network.TLS" and the @lens@ package for details.
-clientParams :: Functor f => (T.ClientParams -> f T.ClientParams)
-             -> (ClientSettings -> f ClientSettings)
+clientParams
+  :: Functor f
+  => (T.ClientParams -> f T.ClientParams)
+  -> (ClientSettings -> f ClientSettings)
 clientParams f = fmap ClientSettings . f . unClientSettings
 
 --------------------------------------------------------------------------------
@@ -190,83 +212,78 @@ clientParams f = fmap ClientSettings . f . unClientSettings
 
 -- | Abstract type representing the configuration settings for a TLS server.
 --
--- Use 'makeServerSettings' to obtain your 'ServerSettings' value, and
+-- Use 'makeServerSettings' to construct a 'ServerSettings' value, and
 -- 'updateServerParams' to update it.
 data ServerSettings = ServerSettings { unServerSettings :: T.ServerParams }
 
 -- | Make default 'ServerSettings'.
 --
--- Initial credentials can be loaded with 'T.credentialLoadX509'
+-- The supported cipher suites are those enumerated by 'TE.ciphersuite_strong',
+-- in decreasing order of preference. The cipher suite preferred by the server
+-- is used.
 --
--- [Supported cipher suites for 'T.TLS10']
--- In decreasing order of preference:
--- 'TE.cipher_AES256_SHA256',
--- 'TE.cipher_AES256_SHA1',
--- 'TE.cipher_AES128_SHA256',
--- 'TE.cipher_AES128_SHA1',
--- 'TE.cipher_RC4_128_SHA1',
--- 'TE.cipher_RC4_128_MD5'.
--- The cipher suite preferred by the client is used.
+-- Secure renegotiation initiated by the server is enabled, but renegotiation
+-- initiated by the client is disabled.
 --
--- [Supported cipher suites for 'T.TLS11' and 'T.TLS12']
--- In decreasing order of preference:
--- 'TE.cipher_AES256_SHA256',
--- 'TE.cipher_AES256_SHA1',
--- 'TE.cipher_AES128_SHA256',
--- 'TE.cipher_AES128_SHA1'.
--- The cipher suite preferred by the client is used.
+-- Only the __TLS 1.1__ and __TLS 1.2__ protocols are supported by default.
+--
+-- If you are unsatisfied with any of these settings, use 'updateServerParams'
+-- to change them.
 makeServerSettings
-  :: T.Credentials            -- ^Server credential.
-  -> (X.FailedReason -> Bool) -- ^Filter client certificate validation errors to achieve desired
-                              -- level of security
-
-  -> Maybe X.CertificateStore -- ^CAs used to verify the client certificate. If
-                              -- specified, then a valid client certificate will
-                              -- be expected during on handshake.
+  :: T.Credential
+  -- ^ Server credentials
+  -> Maybe X.CertificateStore
+  -- ^ CAs used to verify the client certificate.
+  --
+  -- If specified, then a valid client certificate will be expected during
+  -- handshake.
+  --
+  -- Use 'getSystemCertificateStore' to obtain the operating system's defaults.
   -> ServerSettings
-makeServerSettings creds certificateVerifyFilter mcStore =
-  ServerSettings $ modServerParams def
-  where
-    modServerParams p = p {
-      T.serverWantClientCert = maybe False (const True) mcStore
-      , T.serverCACertificates = maybe [] X.listCertificates mcStore
-
-      , T.serverSupported = def {
-        T.supportedCiphers = TE.ciphersuite_strong ++ TE.ciphersuite_medium
+makeServerSettings cred ycStore =
+    ServerSettings $ def
+      { T.serverWantClientCert = isJust ycStore
+      , T.serverShared = def
+        { T.sharedCredentials = T.Credentials [cred] }
+      , T.serverCACertificates = []
+      , T.serverSupported = def
+        { T.supportedVersions = [T.TLS12, T.TLS11]
+        , T.supportedCiphers = TE.ciphersuite_strong
         , T.supportedSession = True
-        }
-
-      , T.serverShared = def {
-        T.sharedCredentials = creds
-        }
-
-      , T.serverHooks = def {
-        T.onClientCertificate  = clientCertsCheck
-        , T.onCipherChoosing   = chooseCipher
-        }
+        , T.supportedSecureRenegotiation = True
+        , T.supportedClientInitiatedRenegotiation = False }
+      , T.serverHooks = def
+        { T.onClientCertificate = clientCertsCheck
+        , T.onCipherChoosing = chooseCipher }
       }
-
-    clientCertsCheck certs = case mcStore of
+  where
+    clientCertsCheck :: X.CertificateChain -> IO T.CertificateUsage
+    clientCertsCheck certs = case ycStore of
       Nothing -> return T.CertificateUsageAccept
       Just cs -> do
-        errs <- X.validateDefault cs def ("", "") certs
-        case filter certificateVerifyFilter errs of
-          [] ->
-            return T.CertificateUsageAccept
-          _ ->
-            T.onClientCertificate def certs
-    -- | Ciphers prefered by the client take precedence.
-    chooseCipher v cCiphs = head (intersect cCiphs (preferredCiphers v))
+        let checks = X.defaultChecks { X.checkFQHN = False }
+        es <- X.validate X.HashSHA256 X.defaultHooks checks cs def ("","") certs
+        case es of
+          [] -> pure T.CertificateUsageAccept
+          errs' -> pure (T.CertificateUsageReject (T.CertificateRejectOther
+                            ("Unacceptable client cert: " ++ show errs')))
+    -- Ciphers prefered by the server take precedence.
+    chooseCipher :: T.Version -> [T.Cipher] -> T.Cipher
+    chooseCipher _ cCiphs = head (intersect TE.ciphersuite_strong cCiphs)
 
 -- | Update advanced TLS server configuration 'T.Params'.
+--
 -- See the "Network.TLS" module for details.
-updateServerParams :: (T.ServerParams -> T.ServerParams) -> ServerSettings -> ServerSettings
+updateServerParams
+  :: (T.ServerParams -> T.ServerParams) -> ServerSettings -> ServerSettings
 updateServerParams f = ServerSettings . f . unServerSettings
 
 -- | A 'Control.Lens.Lens' into the TLS server configuration 'T.Params'.
 -- See the "Network.TLS" and the @lens@ package for details.
-serverParams :: Functor f => (T.ServerParams -> f T.ServerParams)
-             -> (ServerSettings -> f ServerSettings)
+serverParams
+  :: Functor f
+  => (T.ServerParams -> f T.ServerParams)
+  -> (ServerSettings -> f ServerSettings)
 serverParams f = fmap ServerSettings . f . unServerSettings
 
 --------------------------------------------------------------------------------
@@ -463,8 +480,7 @@ useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
 -- | Receives decrypted bytes from the given 'Context'. Returns 'Nothing'
 -- on EOF.
 --
--- Up to @16384@ decrypted bytes will be received at once. The TLS connection is
--- automatically renegotiated if a /ClientHello/ message is received.
+-- Up to @16384@ decrypted bytes will be received at once.
 recv :: MonadIO m => Context -> m (Maybe B.ByteString)
 recv ctx = liftIO $ do
     E.handle (\T.Error_EOF -> return Nothing)
@@ -481,22 +497,7 @@ send ctx = \bs -> T.sendData ctx (BL.fromChunks [bs])
 {-# INLINABLE send #-}
 
 --------------------------------------------------------------------------------
--- Internal: Default ciphers
-preferredCiphers :: T.Version -> [T.Cipher]
-preferredCiphers T.TLS12 = TE.ciphersuite_strong
-preferredCiphers T.TLS11 = TE.ciphersuite_strong
-preferredCiphers T.TLS10 = TE.ciphersuite_strong ++ TE.ciphersuite_medium
-preferredCiphers v = error ("preferredCiphers: " ++ show v ++ " not supported")
-
---------------------------------------------------------------------------------
 -- Internal utils
-
--- | 'Control.Concurrent.forkFinally' was introduced in base==4.6.0.0. We'll use
--- our own version here for a while, until base==4.6.0.0 is widely establised.
-forkFinally :: IO a -> (Either E.SomeException a -> IO ()) -> IO ThreadId
-forkFinally action and_then =
-    E.mask $ \restore ->
-        forkIO $ E.try (restore action) >>= and_then
 
 -- | Like 'T.bye' from the "Network.TLS" module, except it ignores 'ePIPE'
 -- errors which might happen if the remote peer closes the connection first.
@@ -519,3 +520,4 @@ socketBackend sock = do
              step !acc n = do
                 bs <- NSB.recv sock n
                 step (acc `B.append` bs) (n - B.length bs)
+

@@ -15,10 +15,10 @@ import qualified Network.TLS as T
 import           System.Console.GetOpt
 import           System.Environment (getProgName, getArgs)
 
-server :: Z.Credentials -> Z.HostPreference -> NS.ServiceName
+server :: T.Credential -> Z.HostPreference -> NS.ServiceName
        -> Maybe CertificateStore -> IO ()
-server cred hp port mcs = do
-    let ss = Z.makeServerSettings cred (const True) mcs
+server cred hp port ycs = do
+    let ss = Z.makeServerSettings cred ycs
     Z.serve ss hp port $ \(ctx,caddr) -> do
        putStrLn $ show caddr <> " joined."
        consume ctx $ Z.send ctx . B.map toUpper
@@ -54,7 +54,7 @@ main = Z.withSocketsDo $ do
 data Options = Options
   { optServerCertFile     :: FilePath
   , optServerKeyFile      :: FilePath
-  , optServerCredentials  :: T.Credentials
+  , optServerCredentials  :: T.Credential
   , optCACert             :: Maybe [SignedCertificate]
   }
 
@@ -62,8 +62,8 @@ defaultOptions :: Options
 defaultOptions = Options
   { optServerCertFile = error "Missing optServerCertFile"
   , optServerKeyFile = error "Missing optServerKeyFile"
-  , optServerCredentials  = T.Credentials []
-  , optCACert     = Nothing
+  , optServerCredentials = undefined
+  , optCACert = Nothing
   }
 
 options :: [OptDescr (Options -> IO Options)]
@@ -82,12 +82,10 @@ readServerCredentials :: FilePath -> Options -> IO Options
 readServerCredentials arg opt = do
   ec <- T.credentialLoadX509 (optServerCertFile opt) arg
   case ec of
-    Left err ->
-      error err
+    Left err -> error err
     Right c ->
-      return $ opt { optServerCredentials = T.Credentials [c]
-                   , optServerKeyFile = arg
-                   }
+      return $ opt { optServerCredentials = c
+                   , optServerKeyFile = arg }
 
 readCACert :: Maybe FilePath -> Options -> IO Options
 readCACert Nothing    opt = return opt

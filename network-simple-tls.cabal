@@ -1,5 +1,5 @@
 name:                network-simple-tls
-version:             0.3.1
+version:             0.3
 synopsis:            Simple interface to TLS secured network sockets.
 description:         Simple interface to TLS secured network sockets.
 homepage:            https://github.com/k0001/network-simple-tls
@@ -7,8 +7,8 @@ bug-reports:         https://github.com/k0001/network-simple-tls/issues
 license:             BSD3
 license-file:        LICENSE
 author:              Renzo Carbonara
-maintainer:          renzocarbonaraλgmail.com
-copyright:           Copyright (c) Renzo Carbonara 2013
+maintainer:          renλren.zone
+copyright:           Copyright (c) Renzo Carbonara 2013-2018
 category:            Network
 build-type:          Simple
 cabal-version:       >=1.8
@@ -33,44 +33,5 @@ library
                    , x509-store
                    , x509-validation
                    , data-default
-
   ghc-options:      -Wall -O2
-  ghc-prof-options: -prof -fprof-auto-top
 
-executable         tls-echo
-    main-is:           tls-echo.hs
-    hs-source-dirs:    examples
-    build-depends:     base
-                     , network-simple-tls
-                     , bytestring
-                     , network
-                     , exceptions
-                     , network-simple
-                     , tls
-                     , transformers
-                     , x509
-                     , x509-system
-                     , x509-store
-                     , x509-validation
-                     , data-default
-
-    ghc-options:       -threaded -rtsopts -with-rtsopts=-N
-
-executable         https-client
-    main-is:           https-client.hs
-    hs-source-dirs:    examples
-    build-depends:     base
-                     , network-simple-tls
-                     , bytestring
-                     , network
-                     , exceptions
-                     , network-simple
-                     , tls
-                     , transformers
-                     , x509
-                     , x509-system
-                     , x509-store
-                     , x509-validation
-                     , data-default
-
-    ghc-options:       -threaded -rtsopts -with-rtsopts=-N

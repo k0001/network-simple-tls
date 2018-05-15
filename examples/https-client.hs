@@ -20,14 +20,10 @@ import           System.Environment (getProgName, getArgs)
 client :: CertificateStore -> Z.Credentials -> NS.HostName
        -> NS.ServiceName -> IO ()
 client cStore creds host port = do
-    Z.connect csettings host port $ \(ctx,_) -> do
-       T.sendData ctx "GET / HTTP/1.0\r\n\r\n"
-       consume ctx B.putStr >> putStrLn ""
-  where
-    verifyFilter (NameMismatch _) = False
-    verifyFilter LeafNotV3 = False
-    verifyFilter _ = True
-    csettings = Z.makeClientSettings (host, B.pack host) creds False verifyFilter cStore
+  let csettings = Z.makeClientSettings (host, B.pack (':' : port)) creds cStore
+  Z.connect csettings host port $ \(ctx,_) -> do
+     Z.send ctx "GET / HTTP/1.0\r\n\r\n"
+     consume ctx B.putStr >> putStrLn ""
 
 -- | Repeatedly receive data from the given 'T.Context' until exhausted,
 -- performing the given action on each received chunk.

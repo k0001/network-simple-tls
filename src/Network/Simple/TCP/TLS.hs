@@ -10,7 +10,7 @@
 -- in the @network-simple@ package. Consider using that module directly if you
 -- need a similar API without TLS support.
 --
--- This module uses 'MonadIO' and 'C.MonadCatch' extensively so that you can
+-- This module uses 'MonadIO' and 'C.MonadMask' extensively so that you can
 -- reuse these functions in monads other than 'IO'. However, if you don't care
 -- about any of that, just pretend you are using the 'IO' monad all the time
 -- and everything will work as expected.
@@ -231,7 +231,7 @@ data ServerSettings = ServerSettings { unServerSettings :: T.ServerParams }
 -- to change them.
 makeServerSettings
   :: T.Credential
-  -- ^ Server credentials
+  -- ^ Server credential.
   -> Maybe X.CertificateStore
   -- ^ CAs used to verify the client certificate.
   --
@@ -320,7 +320,7 @@ serve ss hp port k = liftIO $ do
 -- in case of exceptions. If you need to manage the lifetime of the connection
 -- resources yourself, then use 'acceptTls' instead.
 accept
-  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
+  :: (MonadIO m, C.MonadMask m)
   => ServerSettings       -- ^TLS settings.
   -> Socket               -- ^Listening and bound socket.
   -> ((Context, SockAddr) -> m r)
@@ -359,7 +359,7 @@ acceptFork ss lsock k = liftIO $ do
 -- in case of exceptions. If you need to manage the lifetime of the connection
 -- resources yourself, then use 'connectTls' instead.
 connect
-  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
+  :: (MonadIO m, C.MonadMask m)
   => ClientSettings       -- ^TLS settings.
   -> HostName             -- ^Server hostname.
   -> ServiceName          -- ^Server service port.
@@ -446,7 +446,7 @@ makeServerContext (ServerSettings params) sock = liftIO $ do
 -- Prefer to use `useTlsThenClose` or `useTlsThenCloseFork` if you need that
 -- behavior. Otherwise, you must call `T.contextClose` yourself at some point.
 useTls
-  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
+  :: (MonadIO m, C.MonadMask m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
 useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
@@ -455,7 +455,7 @@ useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
 
 -- | Like 'useTls', except it also fully closes the TCP connection when done.
 useTlsThenClose
-  :: (MonadIO m, C.MonadCatch m, C.MonadMask m)
+  :: (MonadIO m, C.MonadMask m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
 useTlsThenClose k conn@(ctx,_) = do

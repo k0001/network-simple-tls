@@ -1,3 +1,9 @@
+# Version 0.3.1
+
+* Added SOCKS5 proxy support. See functions `connectOverSOCKS5` and
+  `connectTlsOverSOCKS5`.
+
+
 # Version 0.3
 
 * BREAKING CHANGE: Changed type of the following functions:

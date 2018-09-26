@@ -3,7 +3,7 @@
 let
 src-network-simple = builtins.fetchGit {
   url = "https://github.com/k0001/network-simple";
-  rev = "2c3ab6e7aa2a86be692c55bf6081161d83d50c34";
+  rev = "7465f556b6f1f4882d0dd716df5c918b727961a4";
 };
 
 in

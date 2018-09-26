@@ -31,6 +31,7 @@ module Network.Simple.TCP.TLS (
 
   -- * Client side
   , connect
+  , connectOverSOCKS5
   -- ** Client TLS Settings
   , ClientSettings
   , makeClientSettings
@@ -47,6 +48,7 @@ module Network.Simple.TCP.TLS (
   , useTlsThenClose
   , useTlsThenCloseFork
   , connectTls
+  , connectTlsOverSOCKS5
   , acceptTls
   , makeClientContext
   , makeServerContext
@@ -360,17 +362,42 @@ acceptFork ss lsock k = liftIO $ do
 -- resources yourself, then use 'connectTls' instead.
 connect
   :: (MonadIO m, C.MonadMask m)
-  => ClientSettings       -- ^TLS settings.
-  -> HostName             -- ^Server hostname.
-  -> ServiceName          -- ^Server service port.
+  => ClientSettings       -- ^ TLS settings.
+  -> HostName             -- ^ Server hostname.
+  -> ServiceName          -- ^ Destination server service port name or number.
   -> ((Context, SockAddr) -> m r)
-                          -- ^Computation to run after establishing TLS-secured
-                          -- TCP connection to the remote server. Takes the TLS
-                          -- connection context and remote end address.
+  -- ^ Computation to run after establishing TLS-secured TCP connection to the
+  -- remote server. Takes the TLS connection context and remote end address.
   -> m r
 connect cs host port k = C.bracket (connectTls cs host port)
                                    (liftIO . T.contextClose . fst)
                                    (useTls k)
+
+-- | Like 'connect', but connects to the destination server over a SOCKS5 proxy.
+connectOverSOCKS5
+  :: (MonadIO m, C.MonadMask m)
+  => HostName     -- ^ SOCKS5 proxy server hostname or IP address.
+  -> ServiceName  -- ^ SOCKS5 proxy server service port name or number.
+  -> ClientSettings  -- ^ TLS settings.
+  -> HostName
+  -- ^ Destination server hostname or IP address. We connect to this host
+  -- /through/ the SOCKS5 proxy specified in the previous arguments.
+  --
+  -- Note that if hostname resolution on this 'HostName' is necessary, it
+  -- will happen on the proxy side for security reasons, not locally.
+  -> ServiceName -- ^ Destination server service port name or number.
+  -> ((Context, SockAddr, SockAddr) -> m r)
+  -- ^ Computation to run after establishing TLS-secured TCP connection to the
+  -- remote server. Takes the TLS connection that can be used to interact with
+  -- the destination server, as well as the address of the SOCKS5 server and the
+  -- address of the destination server, in that order.
+  -> m r
+connectOverSOCKS5 phn psn cs dhn dsn k = do
+  C.bracket (connectTlsOverSOCKS5 phn psn cs dhn dsn)
+            (\(ctx, _, _) -> liftIO (T.contextClose ctx))
+            (\(ctx, paddr, daddr) ->
+                useTls (\_ -> k (ctx, paddr, daddr))
+                       (ctx, paddr))
 
 --------------------------------------------------------------------------------
 
@@ -387,9 +414,9 @@ connect cs host port k = C.bracket (connectTls cs host port)
 -- 'useTlsThenCloseFork' can help you with that.
 connectTls
   :: MonadIO m
-  => ClientSettings       -- ^TLS settings.
-  -> HostName             -- ^Server hostname.
-  -> ServiceName          -- ^Service port to bind.
+  => ClientSettings       -- ^ TLS settings.
+  -> HostName             -- ^ Server hostname.
+  -> ServiceName          -- ^ Server service name or port number.
   -> m (Context, SockAddr)
 connectTls cs host port = liftIO $ do
     E.bracketOnError
@@ -398,6 +425,33 @@ connectTls cs host port = liftIO $ do
         (\(sock, addr) -> do
              ctx <- makeClientContext cs sock
              return (ctx, addr))
+
+-- | Like 'connectTls', but connects to the destination server over a SOCKS5
+-- proxy.
+connectTlsOverSOCKS5
+  :: MonadIO m
+  => HostName     -- ^ SOCKS5 proxy server hostname or IP address.
+  -> ServiceName  -- ^ SOCKS5 proxy server service port name or number.
+  -> ClientSettings  -- ^ TLS settings.
+  -> HostName
+  -- ^ Destination server hostname or IP address. We connect to this host
+  -- /through/ the SOCKS5 proxy specified in the previous arguments.
+  --
+  -- Note that if hostname resolution on this 'HostName' is necessary, it
+  -- will happen on the proxy side for security reasons, not locally.
+  -> ServiceName -- ^ Destination server service port name or number.
+  -> m (Context, SockAddr, SockAddr)
+  -- ^ Returns the 'Context' that can be used to interact with the destination
+  -- server, as well as the address of the SOCKS5 server and the address of the
+  -- destination server, in that order.
+connectTlsOverSOCKS5 phn psn cs dhn dsn = liftIO $ do
+  E.bracketOnError
+     (S.connectSock phn psn)
+     (S.closeSock . fst)
+     (\(psock, paddr) -> do
+          daddr <- S.connectSockSOCKS5 psock dhn dsn
+          ctx <- makeClientContext cs psock
+          return (ctx, paddr, daddr))
 
 -- | Make a client-side TLS 'Context' for the given settings, on top of the
 -- given TCP `Socket` connected to the remote end.

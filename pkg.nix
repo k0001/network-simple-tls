@@ -4,7 +4,7 @@
 }:
 mkDerivation {
   pname = "network-simple-tls";
-  version = "0.3";
+  version = "0.3.1";
   src = ./.;
   libraryHaskellDepends = [
     base bytestring data-default exceptions network network-simple tls

@@ -23,15 +23,15 @@ library
   exposed-modules:   Network.Simple.TCP.TLS
   build-depends:     base              (>=4.5     && <5.0)
                    , bytestring
+                   , data-default
                    , network
-                   , exceptions
                    , network-simple
+                   , safe-exceptions
                    , tls
                    , transformers
                    , x509
-                   , x509-system
                    , x509-store
+                   , x509-system
                    , x509-validation
-                   , data-default
   ghc-options:      -Wall -O2
 

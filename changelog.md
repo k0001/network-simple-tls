@@ -3,6 +3,8 @@
 * Added SOCKS5 proxy support. See functions `connectOverSOCKS5` and
   `connectTlsOverSOCKS5`.
 
+* Use `safe-exceptions`.
+
 
 # Version 0.3
 

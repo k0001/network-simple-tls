@@ -10,7 +10,7 @@
 -- in the @network-simple@ package. Consider using that module directly if you
 -- need a similar API without TLS support.
 --
--- This module uses 'MonadIO' and 'C.MonadMask' extensively so that you can
+-- This module uses 'MonadIO' and 'E.MonadMask' extensively so that you can
 -- reuse these functions in monads other than 'IO'. However, if you don't care
 -- about any of that, just pretend you are using the 'IO' monad all the time
 -- and everything will work as expected.
@@ -66,9 +66,8 @@ module Network.Simple.TCP.TLS (
 
 
 import           Control.Concurrent (ThreadId, forkFinally)
-import qualified Control.Exception as E
+import qualified Control.Exception.Safe as E
 import           Control.Monad
-import qualified Control.Monad.Catch as C
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -322,7 +321,7 @@ serve ss hp port k = liftIO $ do
 -- in case of exceptions. If you need to manage the lifetime of the connection
 -- resources yourself, then use 'acceptTls' instead.
 accept
-  :: (MonadIO m, C.MonadMask m)
+  :: (MonadIO m, E.MonadMask m)
   => ServerSettings       -- ^TLS settings.
   -> Socket               -- ^Listening and bound socket.
   -> ((Context, SockAddr) -> m r)
@@ -331,7 +330,7 @@ accept
                           -- TLS-secured communication is established. Takes the
                           -- TLS connection context and remote end address.
   -> m r
-accept ss lsock k = C.bracket (acceptTls ss lsock)
+accept ss lsock k = E.bracket (acceptTls ss lsock)
                               (liftIO . T.contextClose . fst)
                               (useTls k)
 
@@ -361,7 +360,7 @@ acceptFork ss lsock k = liftIO $ do
 -- in case of exceptions. If you need to manage the lifetime of the connection
 -- resources yourself, then use 'connectTls' instead.
 connect
-  :: (MonadIO m, C.MonadMask m)
+  :: (MonadIO m, E.MonadMask m)
   => ClientSettings       -- ^ TLS settings.
   -> HostName             -- ^ Server hostname.
   -> ServiceName          -- ^ Destination server service port name or number.
@@ -369,13 +368,13 @@ connect
   -- ^ Computation to run after establishing TLS-secured TCP connection to the
   -- remote server. Takes the TLS connection context and remote end address.
   -> m r
-connect cs host port k = C.bracket (connectTls cs host port)
+connect cs host port k = E.bracket (connectTls cs host port)
                                    (liftIO . T.contextClose . fst)
                                    (useTls k)
 
 -- | Like 'connect', but connects to the destination server over a SOCKS5 proxy.
 connectOverSOCKS5
-  :: (MonadIO m, C.MonadMask m)
+  :: (MonadIO m, E.MonadMask m)
   => HostName     -- ^ SOCKS5 proxy server hostname or IP address.
   -> ServiceName  -- ^ SOCKS5 proxy server service port name or number.
   -> ClientSettings  -- ^ TLS settings.
@@ -393,7 +392,7 @@ connectOverSOCKS5
   -- address of the destination server, in that order.
   -> m r
 connectOverSOCKS5 phn psn cs dhn dsn k = do
-  C.bracket (connectTlsOverSOCKS5 phn psn cs dhn dsn)
+  E.bracket (connectTlsOverSOCKS5 phn psn cs dhn dsn)
             (\(ctx, _, _) -> liftIO (T.contextClose ctx))
             (\(ctx, paddr, daddr) ->
                 useTls (\_ -> k (ctx, paddr, daddr))
@@ -500,20 +499,20 @@ makeServerContext (ServerSettings params) sock = liftIO $ do
 -- Prefer to use `useTlsThenClose` or `useTlsThenCloseFork` if you need that
 -- behavior. Otherwise, you must call `T.contextClose` yourself at some point.
 useTls
-  :: (MonadIO m, C.MonadMask m)
+  :: (MonadIO m, E.MonadMask m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
-useTls k conn@(ctx,_) = C.bracket_ (T.handshake ctx)
+useTls k conn@(ctx,_) = E.bracket_ (T.handshake ctx)
                                    (liftIO $ silentBye ctx)
                                    (k conn)
 
 -- | Like 'useTls', except it also fully closes the TCP connection when done.
 useTlsThenClose
-  :: (MonadIO m, C.MonadMask m)
+  :: (MonadIO m, E.MonadMask m)
   => ((Context, SockAddr) -> m a)
   -> ((Context, SockAddr) -> m a)
 useTlsThenClose k conn@(ctx,_) = do
-    useTls k conn `C.finally` liftIO (T.contextClose ctx)
+    useTls k conn `E.finally` liftIO (T.contextClose ctx)
 
 -- | Similar to 'useTlsThenClose', except it performs the all the IO actions
 -- in a new  thread.

@@ -1,3 +1,10 @@
+# Version 0.3.2
+
+* Added `sendLazy`.
+
+* Fixed space leak on `recv`. See issue #13.
+
+
 # Version 0.3.1
 
 * Added SOCKS5 proxy support. See functions `connectOverSOCKS5` and

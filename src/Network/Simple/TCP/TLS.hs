@@ -545,8 +545,14 @@ recv ctx = liftIO $ do
 -- | Encrypts the given strict 'B.ByteString' and sends it through the
 -- 'Context'.
 send :: MonadIO m => Context -> B.ByteString -> m ()
-send ctx = \bs -> T.sendData ctx (BL.fromChunks [bs])
+send ctx = \bs -> T.sendData ctx (BL.fromStrict bs)
 {-# INLINABLE send #-}
+
+-- | Encrypts the given lazy 'BL.ByteString' and sends it through the
+-- 'Context'.
+sendLazy :: MonadIO m => Context -> BL.ByteString -> m ()
+sendLazy = T.sendData
+{-# INLINE sendLazy #-}
 
 --------------------------------------------------------------------------------
 -- Internal utils

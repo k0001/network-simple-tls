@@ -83,7 +83,6 @@ import qualified Network.Simple.TCP as S
 import           Network.Simple.TCP (HostPreference(Host, HostAny, HostIPv4, HostIPv6))
 import           Network.Socket (HostName, ServiceName, Socket, SockAddr)
 import qualified Network.Socket as NS
-import qualified Network.Socket.ByteString as NSB
 import qualified Network.TLS as T
 import           Network.TLS (Context)
 import           Network.TLS.Extra as TE
@@ -456,7 +455,7 @@ connectTlsOverSOCKS5 phn psn cs dhn dsn = liftIO $ do
 -- given TCP `Socket` connected to the remote end.
 makeClientContext :: MonadIO m => ClientSettings -> Socket -> m Context
 makeClientContext (ClientSettings params) sock = liftIO $ do
-    T.contextNew (socketBackend sock) params
+    T.contextNew sock params
 
 --------------------------------------------------------------------------------
 
@@ -488,7 +487,7 @@ acceptTls sp lsock = liftIO $ do
 -- given TCP `Socket` connected to the remote end.
 makeServerContext :: MonadIO m => ServerSettings -> Socket -> m Context
 makeServerContext (ServerSettings params) sock = liftIO $ do
-    T.contextNew (socketBackend sock) params
+    T.contextNew sock params
 
 --------------------------------------------------------------------------------
 
@@ -562,15 +561,4 @@ silentBye ctx = do
                   } | Errno ioe == ePIPE
           -> return ()
         _ -> E.throwIO e
-
--- | Makes an TLS context `T.Backend` from a `Socket`.
-socketBackend :: Socket -> T.Backend
-socketBackend sock = do
-    T.Backend (return ()) (S.closeSock sock) (NSB.sendAll sock) recvAll
-  where
-    recvAll = step B.empty
-       where step !acc 0 = return acc
-             step !acc n = do
-                bs <- NSB.recv sock n
-                step (acc `B.append` bs) (n - B.length bs)
 

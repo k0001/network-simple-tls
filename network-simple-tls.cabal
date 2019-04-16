@@ -21,11 +21,11 @@ source-repository head
 library
   hs-source-dirs:    src
   exposed-modules:   Network.Simple.TCP.TLS
-  build-depends:     base              (>=4.5     && <5.0)
+  build-depends:     base >=4.5 && <5.0
                    , bytestring
                    , data-default
                    , network
-                   , network-simple
+                   , network-simple >=0.4.3
                    , safe-exceptions
                    , tls
                    , transformers

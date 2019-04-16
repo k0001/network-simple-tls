@@ -42,6 +42,7 @@ module Network.Simple.TCP.TLS (
   -- * Utils
   , recv
   , send
+  , sendLazy
 
   -- * Low level support
   , useTls

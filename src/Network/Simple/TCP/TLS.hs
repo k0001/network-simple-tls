@@ -24,20 +24,26 @@ module Network.Simple.TCP.TLS (
   , accept
   , acceptFork
   -- ** Server TLS Settings
-  , ServerSettings
-  , makeServerSettings
-  , updateServerParams
-  , serverParams
+  , T.ServerParams
+    -- | Please refer to the "Network.TLS" module for more documentation on
+    -- 'T.ServerParams`.
+    --
+    -- There's plenty to be changed, but the documentation for
+    -- 'T.ServerParams' is not rendered inside "Network.Simple.TCP.TLS" module.
+  , makeServerParams
 
   -- * Client side
   , connect
   , connectOverSOCKS5
   -- ** Client TLS Settings
-  , ClientSettings
-  , makeClientSettings
-  , getDefaultClientSettings
-  , updateClientParams
-  , clientParams
+  , T.ClientParams
+    -- | Please refer to the "Network.TLS" module for more documentation on
+    -- 'T.ClientParams`.
+    --
+    -- There's plenty to be changed, but the documentation for
+    -- 'T.ClientParams' is not rendered inside "Network.Simple.TCP.TLS" module.
+  , makeClientParams
+  , getDefaultClientParams
 
   -- * Utils
   , recv
@@ -107,23 +113,16 @@ import           System.X509 (getSystemCertificateStore)
 --------------------------------------------------------------------------------
 -- Client side TLS settings
 
--- | Abstract type representing the configuration settings for a TLS client.
---
--- Use 'makeClientSettings' or 'getDefaultClientSettings' to obtain a
--- 'ClientSettings' value.
-data ClientSettings = ClientSettings { unClientSettings :: T.ClientParams }
-
--- | Get the system default 'ClientSettings' for a particular 'X.ServiceID'.
+-- | Get the system default 'T.ClientParams' for a particular 'X.ServiceID'.
 --
 -- Defaults: No client credentials, system certificate store.
 --
--- See 'makeClientSettings' to better understand the default settings used.
-getDefaultClientSettings :: MonadIO m => X.ServiceID -> m ClientSettings
-getDefaultClientSettings sid = liftIO $ do
-  makeClientSettings sid (T.Credentials []) <$> getSystemCertificateStore
+-- See 'makeClientParams' to better understand the default settings used.
+getDefaultClientParams :: MonadIO m => X.ServiceID -> m T.ClientParams
+getDefaultClientParams sid = liftIO $ do
+  makeClientParams sid (T.Credentials []) <$> getSystemCertificateStore
 
-
--- | Make defaults 'ClientSettings'.
+-- | Make defaults 'T.ClientParams'.
 --
 -- Certificate chain validation is done by 'X.validateDefault' from the
 -- "Data.X509.Validation" module.
@@ -137,9 +136,10 @@ getDefaultClientSettings sid = liftIO $ do
 --
 -- Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
 --
--- If you are unsatisfied with any of these settings, use 'updateClientParams'
--- to change them.
-makeClientSettings
+-- If you are unsatisfied with any of these settings, please
+-- please refer to the "Network.TLS" module for more documentation on
+-- 'T.ClientParams`.
+makeClientParams
   :: X.ServiceID
   -- ^ @
   -- 'X.ServiceID' ~ ('HostName', 'B.ByteString')
@@ -165,9 +165,9 @@ makeClientSettings
   -- ^ CAs used to verify the server certificate.
   --
   -- Use 'getSystemCertificateStore' to obtain the operating system's defaults.
-  -> ClientSettings
-makeClientSettings (hn, sp) (T.Credentials creds) cStore =
-    ClientSettings $ (T.defaultParamsClient hn sp)
+  -> T.ClientParams
+makeClientParams (hn, sp) (T.Credentials creds) cStore =
+    (T.defaultParamsClient hn sp)
       { T.clientUseServerNameIndication = True
       , T.clientSupported = def
         { T.supportedVersions = [T.TLS13, T.TLS12, T.TLS11]
@@ -192,32 +192,10 @@ makeClientSettings (hn, sp) (T.Credentials creds) cStore =
         isSubject (X.CertificateChain cc, _) =
           any (\c -> (X.certSubjectDN . X.getCertificate) c `elem` dns) cc
 
--- | Update advanced TLS client configuration 'T.ClientParams'.
---
--- See the "Network.TLS" module for details.
-updateClientParams
-  :: (T.ClientParams -> T.ClientParams) -> ClientSettings -> ClientSettings
-updateClientParams f = ClientSettings . f . unClientSettings
-
--- | A 'Control.Lens.Lens' into the TLS client configuration 'T.ClientParams'.
---
--- See the "Network.TLS" and the @lens@ package for details.
-clientParams
-  :: Functor f
-  => (T.ClientParams -> f T.ClientParams)
-  -> (ClientSettings -> f ClientSettings)
-clientParams f = fmap ClientSettings . f . unClientSettings
-
 --------------------------------------------------------------------------------
 -- Server side TLS settings
 
--- | Abstract type representing the configuration settings for a TLS server.
---
--- Use 'makeServerSettings' to construct a 'ServerSettings' value, and
--- 'updateServerParams' to update it.
-data ServerSettings = ServerSettings { unServerSettings :: T.ServerParams }
-
--- | Make default 'ServerSettings'.
+-- | Make default 'T.ServerParams'.
 --
 -- The supported cipher suites are those enumerated by 'TE.ciphersuite_strong',
 -- in decreasing order of preference. The cipher suite preferred by the server
@@ -228,9 +206,10 @@ data ServerSettings = ServerSettings { unServerSettings :: T.ServerParams }
 --
 -- Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
 --
--- If you are unsatisfied with any of these settings, use 'updateServerParams'
--- to change them.
-makeServerSettings
+-- If you are unsatisfied with any of these settings, please
+-- please refer to the "Network.TLS" module for more documentation on
+-- 'T.ServerParams`.
+makeServerParams
   :: T.Credential
   -- ^ Server credential.
   -> Maybe X.CertificateStore
@@ -240,9 +219,8 @@ makeServerSettings
   -- handshake.
   --
   -- Use 'getSystemCertificateStore' to obtain the operating system's defaults.
-  -> ServerSettings
-makeServerSettings cred ycStore =
-    ServerSettings $ def
+  -> T.ServerParams
+makeServerParams cred ycStore = def
       { T.serverWantClientCert = isJust ycStore
       , T.serverShared = def
         { T.sharedCredentials = T.Credentials [cred] }
@@ -272,21 +250,6 @@ makeServerSettings cred ycStore =
     chooseCipher :: T.Version -> [T.Cipher] -> T.Cipher
     chooseCipher _ cCiphs = head (intersect TE.ciphersuite_strong cCiphs)
 
--- | Update advanced TLS server configuration 'T.Params'.
---
--- See the "Network.TLS" module for details.
-updateServerParams
-  :: (T.ServerParams -> T.ServerParams) -> ServerSettings -> ServerSettings
-updateServerParams f = ServerSettings . f . unServerSettings
-
--- | A 'Control.Lens.Lens' into the TLS server configuration 'T.Params'.
--- See the "Network.TLS" and the @lens@ package for details.
-serverParams
-  :: Functor f
-  => (T.ServerParams -> f T.ServerParams)
-  -> (ServerSettings -> f ServerSettings)
-serverParams f = fmap ServerSettings . f . unServerSettings
-
 --------------------------------------------------------------------------------
 
 -- | Start a TLS-secured TCP server that accepts incoming connections and
@@ -299,7 +262,7 @@ serverParams f = fmap ServerSettings . f . unServerSettings
 -- of those steps manually.
 serve
   :: MonadIO m
-  => ServerSettings       -- ^TLS settings.
+  => T.ServerParams       -- ^TLS settings.
   -> S.HostPreference     -- ^Preferred host to bind.
   -> ServiceName          -- ^Service port to bind.
   -> ((Context, SockAddr) -> IO ())
@@ -322,7 +285,7 @@ serve ss hp port k = liftIO $ do
 -- resources yourself, then use 'acceptTls' instead.
 accept
   :: (MonadIO m, E.MonadMask m)
-  => ServerSettings       -- ^TLS settings.
+  => T.ServerParams       -- ^TLS settings.
   -> Socket               -- ^Listening and bound socket.
   -> ((Context, SockAddr) -> m r)
                           -- ^Computation to run in a different thread
@@ -338,7 +301,7 @@ accept ss lsock k = E.bracket (acceptTls ss lsock)
 -- handshake and run the given computation.
 acceptFork
   :: MonadIO m
-  => ServerSettings       -- ^TLS settings.
+  => T.ServerParams       -- ^TLS settings.
   -> Socket               -- ^Listening and bound socket.
   -> ((Context, SockAddr) -> IO ())
                           -- ^Computation to run in a different thread
@@ -361,7 +324,7 @@ acceptFork ss lsock k = liftIO $ do
 -- resources yourself, then use 'connectTls' instead.
 connect
   :: (MonadIO m, E.MonadMask m)
-  => ClientSettings       -- ^ TLS settings.
+  => T.ClientParams       -- ^ TLS settings.
   -> HostName             -- ^ Server hostname.
   -> ServiceName          -- ^ Destination server service port name or number.
   -> ((Context, SockAddr) -> m r)
@@ -375,9 +338,9 @@ connect cs host port k = E.bracket (connectTls cs host port)
 -- | Like 'connect', but connects to the destination server over a SOCKS5 proxy.
 connectOverSOCKS5
   :: (MonadIO m, E.MonadMask m)
-  => HostName     -- ^ SOCKS5 proxy server hostname or IP address.
-  -> ServiceName  -- ^ SOCKS5 proxy server service port name or number.
-  -> ClientSettings  -- ^ TLS settings.
+  => HostName        -- ^ SOCKS5 proxy server hostname or IP address.
+  -> ServiceName     -- ^ SOCKS5 proxy server service port name or number.
+  -> T.ClientParams  -- ^ TLS settings.
   -> HostName
   -- ^ Destination server hostname or IP address. We connect to this host
   -- /through/ the SOCKS5 proxy specified in the previous arguments.
@@ -401,7 +364,7 @@ connectOverSOCKS5 phn psn cs dhn dsn k = do
 --------------------------------------------------------------------------------
 
 -- | Estalbishes a TCP connection to a remote server and returns a TLS
--- 'Context' configured on top of it using the given 'ClientSettings'.
+-- 'Context' configured on top of it using the given 'T.ClientParams'.
 -- The remote end address is also returned.
 --
 -- Prefer to use 'connect' if you will be using the obtained 'Context' within a
@@ -413,7 +376,7 @@ connectOverSOCKS5 phn psn cs dhn dsn k = do
 -- 'useTlsThenCloseFork' can help you with that.
 connectTls
   :: MonadIO m
-  => ClientSettings       -- ^ TLS settings.
+  => T.ClientParams       -- ^ TLS settings.
   -> HostName             -- ^ Server hostname.
   -> ServiceName          -- ^ Server service name or port number.
   -> m (Context, SockAddr)
@@ -429,9 +392,9 @@ connectTls cs host port = liftIO $ do
 -- proxy.
 connectTlsOverSOCKS5
   :: MonadIO m
-  => HostName     -- ^ SOCKS5 proxy server hostname or IP address.
-  -> ServiceName  -- ^ SOCKS5 proxy server service port name or number.
-  -> ClientSettings  -- ^ TLS settings.
+  => HostName        -- ^ SOCKS5 proxy server hostname or IP address.
+  -> ServiceName     -- ^ SOCKS5 proxy server service port name or number.
+  -> T.ClientParams  -- ^ TLS settings.
   -> HostName
   -- ^ Destination server hostname or IP address. We connect to this host
   -- /through/ the SOCKS5 proxy specified in the previous arguments.
@@ -454,14 +417,13 @@ connectTlsOverSOCKS5 phn psn cs dhn dsn = liftIO $ do
 
 -- | Make a client-side TLS 'Context' for the given settings, on top of the
 -- given TCP `Socket` connected to the remote end.
-makeClientContext :: MonadIO m => ClientSettings -> Socket -> m Context
-makeClientContext (ClientSettings params) sock = liftIO $ do
-    T.contextNew sock params
+makeClientContext :: MonadIO m => T.ClientParams -> Socket -> m Context
+makeClientContext params sock = liftIO $ T.contextNew sock params
 
 --------------------------------------------------------------------------------
 
 -- | Accepts an incoming TCP connection and returns a TLS 'Context' configured
--- on top of it using the given 'ServerSettings'. The remote end address is also
+-- on top of it using the given 'T.ServerParams'. The remote end address is also
 -- returned.
 --
 -- Prefer to use 'accept' if you will be using the obtained 'Context' within a
@@ -473,7 +435,7 @@ makeClientContext (ClientSettings params) sock = liftIO $ do
 -- 'useTlsThenCloseFork' can help you with that.
 acceptTls
   :: MonadIO m
-  => ServerSettings   -- ^TLS settings.
+  => T.ServerParams   -- ^TLS settings.
   -> Socket           -- ^Listening and bound socket.
   -> m (Context, SockAddr)
 acceptTls sp lsock = liftIO $ do
@@ -486,9 +448,8 @@ acceptTls sp lsock = liftIO $ do
 
 -- | Make a server-side TLS 'Context' for the given settings, on top of the
 -- given TCP `Socket` connected to the remote end.
-makeServerContext :: MonadIO m => ServerSettings -> Socket -> m Context
-makeServerContext (ServerSettings params) sock = liftIO $ do
-    T.contextNew sock params
+makeServerContext :: MonadIO m => T.ServerParams -> Socket -> m Context
+makeServerContext params sock = liftIO $ T.contextNew sock params
 
 --------------------------------------------------------------------------------
 
@@ -569,3 +530,14 @@ silentBye ctx = do
           -> return ()
         _ -> E.throwIO e
 
+--------------------------------------------------------------------------------
+
+-- $doc-server-params
+--
+-- Please refer to the "Network.TLS" module for more documentation on
+-- 'T.ServerParams`.
+
+-- $doc-client-params
+--
+-- Please refer to the "Network.TLS" module for more documentation on
+-- 'T.ClientParams`.

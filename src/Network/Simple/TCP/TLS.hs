@@ -136,7 +136,17 @@ newDefaultClientParams
   -- 'X.ServiceID' ~ ('S.HostName', 'B.ByteString')
   -- @
   --
-  -- See the docs for 'makeClientParams'.
+  -- Identification of the connection consisting of the fully qualified host
+  -- name for the server (e.g. www.example.com) and an optional suffix.
+  --
+  -- It is important that the hostname part is properly filled for security
+  -- reasons, as it allow to properly associate the remote side with the given
+  -- certificate during a handshake.
+  --
+  -- The suffix is used to identity a certificate per service on a specific
+  -- host. For example, a same host might have different certificates on
+  -- differents ports (443 and 995). For TCP connections, it's recommended
+  -- to use: @:port@, or @:service@ for the blob (e.g., \@":443"@, @\":https"@).
   -> m T.ClientParams
 newDefaultClientParams sid = liftIO $ do
   cs <- getSystemCertificateStore

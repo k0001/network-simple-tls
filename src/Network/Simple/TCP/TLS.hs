@@ -119,8 +119,6 @@ import           System.X509 (getSystemCertificateStore)
 
 -- | Obtain new default 'T.ClientParams' for a particular 'X.ServiceID'.
 --
--- Defaults:
---
 -- * No client credentials sumbitted to the server.
 --
 -- * Use system-wide CA certificate store.
@@ -151,17 +149,17 @@ newDefaultClientParams sid = liftIO $ do
 
 -- | Make defaults 'T.ClientParams'.
 --
--- Certificate chain validation is done by 'X.validateDefault' from the
+-- * Certificate chain validation is done by 'X.validateDefault' from the
 -- "Data.X509.Validation" module.
 --
--- The Server Name Indication (SNI) TLS extension is enabled.
+-- * The Server Name Indication (SNI) TLS extension is enabled.
 --
--- The supported cipher suites are those enumerated by 'TE.ciphersuite_default',
+-- * The supported cipher suites are those enumerated by 'TE.ciphersuite_default',
 -- in decreasing order of preference.
 --
--- Secure renegotiation is enabled.
+-- * Secure renegotiation is enabled.
 --
--- Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
+-- * Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
 --
 -- If you are unsatisfied with any of these settings, please
 -- please refer to the "Network.TLS" module for more documentation on
@@ -225,14 +223,14 @@ makeClientParams (hn, sp) (T.Credentials creds) cStore =
 
 -- | Make default 'T.ServerParams'.
 --
--- The supported cipher suites are those enumerated by 'TE.ciphersuite_strong',
+-- * The supported cipher suites are those enumerated by 'TE.ciphersuite_strong',
 -- in decreasing order of preference. The cipher suite preferred by the server
 -- is used.
 --
--- Secure renegotiation initiated by the server is enabled, but renegotiation
+-- * Secure renegotiation initiated by the server is enabled, but renegotiation
 -- initiated by the client is disabled.
 --
--- Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
+-- * Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
 --
 -- If you are unsatisfied with any of these settings, please
 -- please refer to the "Network.TLS" module for more documentation on
@@ -279,8 +277,6 @@ makeServerParams cred ycStore = def
     chooseCipher _ cCiphs = head (intersect TE.ciphersuite_strong cCiphs)
 
 -- | Obtain new default 'T.ServerParams' for a particular server 'T.Credential'.
---
--- Defaults:
 --
 -- * Don't require credentials from clients.
 --

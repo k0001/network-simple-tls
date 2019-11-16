@@ -135,7 +135,7 @@ getDefaultClientSettings sid = liftIO $ do
 --
 -- Secure renegotiation is enabled.
 --
--- Only the __TLS 1.1__ and __TLS 1.2__ protocols are supported by default.
+-- Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
 --
 -- If you are unsatisfied with any of these settings, use 'updateClientParams'
 -- to change them.
@@ -170,7 +170,7 @@ makeClientSettings (hn, sp) (T.Credentials creds) cStore =
     ClientSettings $ (T.defaultParamsClient hn sp)
       { T.clientUseServerNameIndication = True
       , T.clientSupported = def
-        { T.supportedVersions = [T.TLS12, T.TLS11]
+        { T.supportedVersions = [T.TLS13, T.TLS12, T.TLS11]
         , T.supportedCiphers = TE.ciphersuite_default
         , T.supportedSecureRenegotiation = True
         , T.supportedClientInitiatedRenegotiation = True }
@@ -226,7 +226,7 @@ data ServerSettings = ServerSettings { unServerSettings :: T.ServerParams }
 -- Secure renegotiation initiated by the server is enabled, but renegotiation
 -- initiated by the client is disabled.
 --
--- Only the __TLS 1.1__ and __TLS 1.2__ protocols are supported by default.
+-- Only the __TLS 1.1__, __TLS 1.2__ and __TLS 1.3__ protocols are supported by default.
 --
 -- If you are unsatisfied with any of these settings, use 'updateServerParams'
 -- to change them.
@@ -248,7 +248,7 @@ makeServerSettings cred ycStore =
         { T.sharedCredentials = T.Credentials [cred] }
       , T.serverCACertificates = []
       , T.serverSupported = def
-        { T.supportedVersions = [T.TLS12, T.TLS11]
+        { T.supportedVersions = [T.TLS13, T.TLS12, T.TLS11]
         , T.supportedCiphers = TE.ciphersuite_strong
         , T.supportedSession = True
         , T.supportedSecureRenegotiation = True

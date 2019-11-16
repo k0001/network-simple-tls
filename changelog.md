@@ -22,8 +22,10 @@
 * Added `newDefaultServerParams`, which creates a `ServerParams` with an
   in-memory `SessionManager`.
 
-* Re-export `ServerParams`, `ClientParams` and `credentialLoadX509` from
-  `Network.TLS`.
+* Re-export `ServerParams`, `ClientParams` from `Network.TLS`.
+
+* Export `credentialLoadX509`, which is the same as
+  `Network.TLS.credentialLoadX509` but runs in `MonadIO`.
 
 * Support TLS 1.3, TLS 1.2 and TLS 1.1 by default.
 

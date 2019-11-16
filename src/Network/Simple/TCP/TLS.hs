@@ -73,7 +73,7 @@ module Network.Simple.TCP.TLS (
     -- There's plenty to be changed, but the documentation for
     -- 'T.ServerParams' is not rendered inside "Network.Simple.TCP.TLS" module.
   , T.Credential
-  , T.credentialLoadX509
+  , credentialLoadX509
   ) where
 
 
@@ -113,7 +113,7 @@ import           System.X509 (getSystemCertificateStore)
 --   @'S.HostPreference'('S.Host','S.HostAny','S.HostIPv4','S.HostIPv6')@.
 --
 -- [From "Network.TLS"] 'T.Context', 'T.Credential', 'T.ServerParams',
---   'T.ClientParams', 'T.credentialLoadX509'.
+--   'T.ClientParams', 'credentialLoadX509'.
 
 --------------------------------------------------------------------------------
 -- Client side TLS settings
@@ -197,7 +197,7 @@ makeClientParams
   -- ^ Credentials to provide to the server if requested. Only credentials
   -- matching the server's 'X.DistinguishedName' will be submitted.
   --
-  -- Can be loaded with 'T.credentialLoadX509' or similar functions.
+  -- Can be loaded with 'credentialLoadX509' or similar functions.
   -> X.CertificateStore
   -- ^ CAs used to verify the server certificate.
   --
@@ -250,7 +250,7 @@ makeServerParams
   :: T.Credential
   -- ^ Server credential.
   --
-  -- Can be loaded with 'T.credentialLoadX509' or similar functions.
+  -- Can be loaded with 'credentialLoadX509' or similar functions.
   -> Maybe X.CertificateStore
   -- ^ CAs used to verify the client certificate.
   --
@@ -303,7 +303,7 @@ newDefaultServerParams
   => T.Credential
   -- ^ Server credential.
   --
-  -- Can be loaded with 'T.credentialLoadX509' or similar functions.
+  -- Can be loaded with 'credentialLoadX509' or similar functions.
   -> m T.ServerParams
 newDefaultServerParams cred = liftIO $ do
   sm <- TSM.newSessionManager TSM.defaultConfig
@@ -580,6 +580,17 @@ sendLazy = T.sendData
 {-# INLINE sendLazy #-}
 
 --------------------------------------------------------------------------------
+
+-- | Try to create a new credential object from a public certificate and the
+-- associated private key that are stored on the filesystem in PEM format.
+credentialLoadX509
+  :: MonadIO m
+  => FilePath -- ^ Public certificate (X.509 format).
+  -> FilePath -- ^ Private key associated with the certificate.
+  -> m (Either String T.Credential)
+credentialLoadX509 cert key = liftIO $ T.credentialLoadX509 cert key
+
+--------------------------------------------------------------------------------
 -- Internal utils
 
 -- | Like 'T.bye' from the "Network.TLS" module, except it ignores 'ePIPE'
@@ -591,5 +602,3 @@ silentBye ctx = do
                   , Eg.ioe_errno = Just ioe
                   } | Errno ioe == ePIPE
           -> return ()
-        _ -> E.throwIO e
-

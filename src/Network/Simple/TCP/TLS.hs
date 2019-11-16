@@ -24,24 +24,12 @@ module Network.Simple.TCP.TLS (
   , accept
   , acceptFork
   -- ** Server TLS Settings
-  , T.ServerParams
-    -- | Please refer to the "Network.TLS" module for more documentation on
-    -- 'T.ServerParams`.
-    --
-    -- There's plenty to be changed, but the documentation for
-    -- 'T.ServerParams' is not rendered inside "Network.Simple.TCP.TLS" module.
   , makeServerParams
 
   -- * Client side
   , connect
   , connectOverSOCKS5
   -- ** Client TLS Settings
-  , T.ClientParams
-    -- | Please refer to the "Network.TLS" module for more documentation on
-    -- 'T.ClientParams`.
-    --
-    -- There's plenty to be changed, but the documentation for
-    -- 'T.ClientParams' is not rendered inside "Network.Simple.TCP.TLS" module.
   , makeClientParams
   , getDefaultClientParams
 
@@ -60,15 +48,29 @@ module Network.Simple.TCP.TLS (
   , makeClientContext
   , makeServerContext
 
-  -- * Note to Windows users
-  , NS.withSocketsDo
-
   -- * Re-exports
   -- $reexports
-  , module Network.Simple.TCP
-  , module Network.Socket
-  , module Network.TLS
+  , NS.withSocketsDo
+  , S.HostPreference(..)
+  , NS.HostName
+  , NS.ServiceName
+    -- | A service port like @"80"@ or its name @"www"@.
+  , NS.Socket
+  , NS.SockAddr
+  , T.Context
   , T.Credentials
+  , T.ClientParams
+    -- | Please refer to the "Network.TLS" module for more documentation on
+    -- 'T.ClientParams`.
+    --
+    -- There's plenty to be changed, but the documentation for
+    -- 'T.ClientParams' is not rendered inside "Network.Simple.TCP.TLS" module.
+  , T.ServerParams
+    -- | Please refer to the "Network.TLS" module for more documentation on
+    -- 'T.ServerParams`.
+    --
+    -- There's plenty to be changed, but the documentation for
+    -- 'T.ServerParams' is not rendered inside "Network.Simple.TCP.TLS" module.
   ) where
 
 
@@ -87,11 +89,8 @@ import qualified Data.X509.Validation as X
 import           Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as Eg
 import qualified Network.Simple.TCP as S
-import           Network.Simple.TCP (HostPreference(Host, HostAny, HostIPv4, HostIPv6))
-import           Network.Socket (HostName, ServiceName, Socket, SockAddr)
 import qualified Network.Socket as NS
 import qualified Network.TLS as T
-import           Network.TLS (Context)
 import           Network.TLS.Extra as TE
 import           System.X509 (getSystemCertificateStore)
 
@@ -103,12 +102,14 @@ import           System.X509 (getSystemCertificateStore)
 -- For your convenience, this module module also re-exports the following types
 -- from other modules:
 --
--- [From "Network.Socket"] 'HostName', 'ServiceName', 'Socket', 'SockAddr'.
+-- [From "Network.Socket"] 'NS.HostName', 'NS.ServiceName', 'NS.Socket',
+--   'NS.SockAddr', 'NS.withSocketsDo'.
 --
 -- [From "Network.Simple.TCP"]
---   @'HostPreference'('Host','HostAny','HostIPv4','HostIPv6')@.
+--   @'S.HostPreference'('S.Host','S.HostAny','S.HostIPv4','S.HostIPv6')@.
 --
--- [From "Network.TLS"] 'Context'.
+-- [From "Network.TLS"] 'T.Context', 'T.Credentials', 'T.ServerParams',
+--   'T.ClientParams'.
 
 --------------------------------------------------------------------------------
 -- Client side TLS settings
@@ -142,7 +143,7 @@ getDefaultClientParams sid = liftIO $ do
 makeClientParams
   :: X.ServiceID
   -- ^ @
-  -- 'X.ServiceID' ~ ('HostName', 'B.ByteString')
+  -- 'X.ServiceID' ~ ('S.HostName', 'B.ByteString')
   -- @
   --
   -- Identification of the connection consisting of the fully qualified host
@@ -264,8 +265,8 @@ serve
   :: MonadIO m
   => T.ServerParams       -- ^TLS settings.
   -> S.HostPreference     -- ^Preferred host to bind.
-  -> ServiceName          -- ^Service port to bind.
-  -> ((Context, SockAddr) -> IO ())
+  -> S.ServiceName          -- ^Service port to bind.
+  -> ((T.Context, S.SockAddr) -> IO ())
                           -- ^Computation to run in a different thread
                           -- once an incomming connection is accepted and a
                           -- TLS-secured communication is established. Takes the
@@ -286,8 +287,8 @@ serve ss hp port k = liftIO $ do
 accept
   :: (MonadIO m, E.MonadMask m)
   => T.ServerParams       -- ^TLS settings.
-  -> Socket               -- ^Listening and bound socket.
-  -> ((Context, SockAddr) -> m r)
+  -> S.Socket               -- ^Listening and bound socket.
+  -> ((T.Context, S.SockAddr) -> m r)
                           -- ^Computation to run in a different thread
                           -- once an incomming connection is accepted and a
                           -- TLS-secured communication is established. Takes the
@@ -302,8 +303,8 @@ accept ss lsock k = E.bracket (acceptTls ss lsock)
 acceptFork
   :: MonadIO m
   => T.ServerParams       -- ^TLS settings.
-  -> Socket               -- ^Listening and bound socket.
-  -> ((Context, SockAddr) -> IO ())
+  -> S.Socket               -- ^Listening and bound socket.
+  -> ((T.Context, S.SockAddr) -> IO ())
                           -- ^Computation to run in a different thread
                           -- once an incomming connection is accepted and a
                           -- TLS-secured communication is established. Takes the
@@ -325,9 +326,9 @@ acceptFork ss lsock k = liftIO $ do
 connect
   :: (MonadIO m, E.MonadMask m)
   => T.ClientParams       -- ^ TLS settings.
-  -> HostName             -- ^ Server hostname.
-  -> ServiceName          -- ^ Destination server service port name or number.
-  -> ((Context, SockAddr) -> m r)
+  -> S.HostName             -- ^ Server hostname.
+  -> S.ServiceName          -- ^ Destination server service port name or number.
+  -> ((T.Context, S.SockAddr) -> m r)
   -- ^ Computation to run after establishing TLS-secured TCP connection to the
   -- remote server. Takes the TLS connection context and remote end address.
   -> m r
@@ -338,17 +339,17 @@ connect cs host port k = E.bracket (connectTls cs host port)
 -- | Like 'connect', but connects to the destination server over a SOCKS5 proxy.
 connectOverSOCKS5
   :: (MonadIO m, E.MonadMask m)
-  => HostName        -- ^ SOCKS5 proxy server hostname or IP address.
-  -> ServiceName     -- ^ SOCKS5 proxy server service port name or number.
+  => S.HostName        -- ^ SOCKS5 proxy server hostname or IP address.
+  -> S.ServiceName     -- ^ SOCKS5 proxy server service port name or number.
   -> T.ClientParams  -- ^ TLS settings.
-  -> HostName
+  -> S.HostName
   -- ^ Destination server hostname or IP address. We connect to this host
   -- /through/ the SOCKS5 proxy specified in the previous arguments.
   --
-  -- Note that if hostname resolution on this 'HostName' is necessary, it
+  -- Note that if hostname resolution on this 'S.HostName' is necessary, it
   -- will happen on the proxy side for security reasons, not locally.
-  -> ServiceName -- ^ Destination server service port name or number.
-  -> ((Context, SockAddr, SockAddr) -> m r)
+  -> S.ServiceName -- ^ Destination server service port name or number.
+  -> ((T.Context, S.SockAddr, S.SockAddr) -> m r)
   -- ^ Computation to run after establishing TLS-secured TCP connection to the
   -- remote server. Takes the TLS connection that can be used to interact with
   -- the destination server, as well as the address of the SOCKS5 server and the
@@ -364,22 +365,22 @@ connectOverSOCKS5 phn psn cs dhn dsn k = do
 --------------------------------------------------------------------------------
 
 -- | Estalbishes a TCP connection to a remote server and returns a TLS
--- 'Context' configured on top of it using the given 'T.ClientParams'.
+-- 'T.Context' configured on top of it using the given 'T.ClientParams'.
 -- The remote end address is also returned.
 --
--- Prefer to use 'connect' if you will be using the obtained 'Context' within a
+-- Prefer to use 'connect' if you will be using the obtained 'T.Context' within a
 -- limited scope.
 --
--- You need to perform a TLS handshake on the resulting 'Context' before using
+-- You need to perform a TLS handshake on the resulting 'T.Context' before using
 -- it for communication purposes, and gracefully close the TLS and TCP
 -- connections afterwards using. The 'useTls', 'useTlsThenClose' and
 -- 'useTlsThenCloseFork' can help you with that.
 connectTls
   :: MonadIO m
   => T.ClientParams       -- ^ TLS settings.
-  -> HostName             -- ^ Server hostname.
-  -> ServiceName          -- ^ Server service name or port number.
-  -> m (Context, SockAddr)
+  -> S.HostName             -- ^ Server hostname.
+  -> S.ServiceName          -- ^ Server service name or port number.
+  -> m (T.Context, S.SockAddr)
 connectTls cs host port = liftIO $ do
     E.bracketOnError
         (S.connectSock host port)
@@ -392,18 +393,18 @@ connectTls cs host port = liftIO $ do
 -- proxy.
 connectTlsOverSOCKS5
   :: MonadIO m
-  => HostName        -- ^ SOCKS5 proxy server hostname or IP address.
-  -> ServiceName     -- ^ SOCKS5 proxy server service port name or number.
+  => S.HostName        -- ^ SOCKS5 proxy server hostname or IP address.
+  -> S.ServiceName     -- ^ SOCKS5 proxy server service port name or number.
   -> T.ClientParams  -- ^ TLS settings.
-  -> HostName
+  -> S.HostName
   -- ^ Destination server hostname or IP address. We connect to this host
   -- /through/ the SOCKS5 proxy specified in the previous arguments.
   --
-  -- Note that if hostname resolution on this 'HostName' is necessary, it
+  -- Note that if hostname resolution on this 'S.HostName' is necessary, it
   -- will happen on the proxy side for security reasons, not locally.
-  -> ServiceName -- ^ Destination server service port name or number.
-  -> m (Context, SockAddr, SockAddr)
-  -- ^ Returns the 'Context' that can be used to interact with the destination
+  -> S.ServiceName -- ^ Destination server service port name or number.
+  -> m (T.Context, S.SockAddr, S.SockAddr)
+  -- ^ Returns the 'T.Context' that can be used to interact with the destination
   -- server, as well as the address of the SOCKS5 server and the address of the
   -- destination server, in that order.
 connectTlsOverSOCKS5 phn psn cs dhn dsn = liftIO $ do
@@ -415,29 +416,29 @@ connectTlsOverSOCKS5 phn psn cs dhn dsn = liftIO $ do
           ctx <- makeClientContext cs psock
           return (ctx, paddr, daddr))
 
--- | Make a client-side TLS 'Context' for the given settings, on top of the
--- given TCP `Socket` connected to the remote end.
-makeClientContext :: MonadIO m => T.ClientParams -> Socket -> m Context
+-- | Make a client-side TLS 'T.Context' for the given settings, on top of the
+-- given TCP `S.Socket` connected to the remote end.
+makeClientContext :: MonadIO m => T.ClientParams -> S.Socket -> m T.Context
 makeClientContext params sock = liftIO $ T.contextNew sock params
 
 --------------------------------------------------------------------------------
 
--- | Accepts an incoming TCP connection and returns a TLS 'Context' configured
+-- | Accepts an incoming TCP connection and returns a TLS 'T.Context' configured
 -- on top of it using the given 'T.ServerParams'. The remote end address is also
 -- returned.
 --
--- Prefer to use 'accept' if you will be using the obtained 'Context' within a
+-- Prefer to use 'accept' if you will be using the obtained 'T.Context' within a
 -- limited scope.
 --
--- You need to perform a TLS handshake on the resulting 'Context' before using
+-- You need to perform a TLS handshake on the resulting 'T.Context' before using
 -- it for communication purposes, and gracefully close the TLS and TCP
 -- connections afterwards using. The 'useTls', 'useTlsThenClose' and
 -- 'useTlsThenCloseFork' can help you with that.
 acceptTls
   :: MonadIO m
   => T.ServerParams   -- ^TLS settings.
-  -> Socket           -- ^Listening and bound socket.
-  -> m (Context, SockAddr)
+  -> S.Socket           -- ^Listening and bound socket.
+  -> m (T.Context, S.SockAddr)
 acceptTls sp lsock = liftIO $ do
     E.bracketOnError
         (NS.accept lsock)
@@ -446,14 +447,14 @@ acceptTls sp lsock = liftIO $ do
              ctx <- makeServerContext sp sock
              return (ctx, addr))
 
--- | Make a server-side TLS 'Context' for the given settings, on top of the
--- given TCP `Socket` connected to the remote end.
-makeServerContext :: MonadIO m => T.ServerParams -> Socket -> m Context
+-- | Make a server-side TLS 'T.Context' for the given settings, on top of the
+-- given TCP `S.Socket` connected to the remote end.
+makeServerContext :: MonadIO m => T.ServerParams -> S.Socket -> m T.Context
 makeServerContext params sock = liftIO $ T.contextNew sock params
 
 --------------------------------------------------------------------------------
 
--- | Perform a TLS handshake on the given 'Context', then perform the
+-- | Perform a TLS handshake on the given 'T.Context', then perform the
 -- given action and at last gracefully close the TLS session using `T.bye`.
 --
 -- This function does not close the underlying TCP connection when done.
@@ -461,8 +462,8 @@ makeServerContext params sock = liftIO $ T.contextNew sock params
 -- behavior. Otherwise, you must call `T.contextClose` yourself at some point.
 useTls
   :: (MonadIO m, E.MonadMask m)
-  => ((Context, SockAddr) -> m a)
-  -> ((Context, SockAddr) -> m a)
+  => ((T.Context, S.SockAddr) -> m a)
+  -> ((T.Context, S.SockAddr) -> m a)
 useTls k conn@(ctx,_) = E.bracket_ (T.handshake ctx)
                                    (liftIO $ silentBye ctx)
                                    (k conn)
@@ -470,8 +471,8 @@ useTls k conn@(ctx,_) = E.bracket_ (T.handshake ctx)
 -- | Like 'useTls', except it also fully closes the TCP connection when done.
 useTlsThenClose
   :: (MonadIO m, E.MonadMask m)
-  => ((Context, SockAddr) -> m a)
-  -> ((Context, SockAddr) -> m a)
+  => ((T.Context, S.SockAddr) -> m a)
+  -> ((T.Context, S.SockAddr) -> m a)
 useTlsThenClose k conn@(ctx,_) = do
     useTls k conn `E.finally` liftIO (T.contextClose ctx)
 
@@ -482,8 +483,8 @@ useTlsThenClose k conn@(ctx,_) = do
 -- the right behavior.
 useTlsThenCloseFork
   :: MonadIO m
-  => ((Context, SockAddr) -> IO ())
-  -> ((Context, SockAddr) -> m ThreadId)
+  => ((T.Context, S.SockAddr) -> IO ())
+  -> ((T.Context, S.SockAddr) -> m ThreadId)
 useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
     forkFinally (E.bracket_ (T.handshake ctx) (silentBye ctx) (k conn))
                 (\eu -> T.contextClose ctx >> either E.throwIO return eu)
@@ -491,11 +492,11 @@ useTlsThenCloseFork k conn@(ctx,_) = liftIO $ do
 --------------------------------------------------------------------------------
 -- Utils
 
--- | Receives decrypted bytes from the given 'Context'. Returns 'Nothing'
+-- | Receives decrypted bytes from the given 'T.Context'. Returns 'Nothing'
 -- on EOF.
 --
 -- Up to @16384@ decrypted bytes will be received at once.
-recv :: MonadIO m => Context -> m (Maybe B.ByteString)
+recv :: MonadIO m => T.Context -> m (Maybe B.ByteString)
 recv ctx = liftIO $ do
     E.handle (\T.Error_EOF -> return Nothing)
              (do bs <- T.recvData ctx
@@ -505,14 +506,14 @@ recv ctx = liftIO $ do
 {-# INLINABLE recv #-}
 
 -- | Encrypts the given strict 'B.ByteString' and sends it through the
--- 'Context'.
-send :: MonadIO m => Context -> B.ByteString -> m ()
+-- 'T.Context'.
+send :: MonadIO m => T.Context -> B.ByteString -> m ()
 send ctx = \bs -> T.sendData ctx (BL.fromStrict bs)
 {-# INLINABLE send #-}
 
 -- | Encrypts the given lazy 'BL.ByteString' and sends it through the
--- 'Context'.
-sendLazy :: MonadIO m => Context -> BL.ByteString -> m ()
+-- 'T.Context'.
+sendLazy :: MonadIO m => T.Context -> BL.ByteString -> m ()
 sendLazy = T.sendData
 {-# INLINE sendLazy #-}
 
@@ -521,7 +522,7 @@ sendLazy = T.sendData
 
 -- | Like 'T.bye' from the "Network.TLS" module, except it ignores 'ePIPE'
 -- errors which might happen if the remote peer closes the connection first.
-silentBye :: Context -> IO ()
+silentBye :: T.Context -> IO ()
 silentBye ctx = do
     E.catch (T.bye ctx) $ \e -> case e of
         Eg.IOError{ Eg.ioe_type  = Eg.ResourceVanished
@@ -530,14 +531,3 @@ silentBye ctx = do
           -> return ()
         _ -> E.throwIO e
 
---------------------------------------------------------------------------------
-
--- $doc-server-params
---
--- Please refer to the "Network.TLS" module for more documentation on
--- 'T.ServerParams`.
-
--- $doc-client-params
---
--- Please refer to the "Network.TLS" module for more documentation on
--- 'T.ClientParams`.

@@ -196,7 +196,7 @@ makeClientParams
   -- ^ Credentials to provide to the server if requested. Only credentials
   -- matching the server's 'X.DistinguishedName' will be submitted.
   --
-  -- Initial credentials can be loaded with 'T.credentialLoadX509'
+  -- Can be loaded with 'T.credentialLoadX509' or similar functions.
   -> X.CertificateStore
   -- ^ CAs used to verify the server certificate.
   --
@@ -248,6 +248,8 @@ makeClientParams (hn, sp) (T.Credentials creds) cStore =
 makeServerParams
   :: T.Credential
   -- ^ Server credential.
+  --
+  -- Can be loaded with 'T.credentialLoadX509' or similar functions.
   -> Maybe X.CertificateStore
   -- ^ CAs used to verify the client certificate.
   --
@@ -297,7 +299,10 @@ makeServerParams cred ycStore = def
 -- * Everything else as proposed by 'makeServerParams'.
 newDefaultServerParams
   :: MonadIO m
-  => T.Credential -- ^ Server credential.
+  => T.Credential
+  -- ^ Server credential.
+  --
+  -- Can be loaded with 'T.credentialLoadX509' or similar functions.
   -> m T.ServerParams
 newDefaultServerParams cred = liftIO $ do
   sm <- TSM.newSessionManager TSM.defaultConfig

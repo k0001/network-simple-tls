@@ -7,17 +7,23 @@
   The related functions `updateClientParams`, `clientParams`,
   `updateServerParams`, `serverParams` are gone.
 
-  `makeClientSettings` was renamed to `makeClientParams`.
+  `makeClientSettings` was renamed to `makeClientParams`, which returns
+  `ClientParams` and takes `[Credential]` rather than `Credentials`.
 
-  `makeServerSettings` was renamed to `makeServerParams`.
+  `makeServerSettings` was renamed to `makeServerParams`, which returns
+  `ServerParams`.
 
   `getDefaultClientSettings` was replaced by `newDefaultClientParams`, which adds
   an in-memory `SessionManager` to the `ClientParams`.
 
+* COMPILER ASSISTED BREAKING CHANGE: `Credentials` from `Network.TLS` is not
+  re-exported anymore.
+
 * Added `newDefaultServerParams`, which creates a `ServerParams` with an
   in-memory `SessionManager`.
 
-* Re-export `ServerParams` and `ClientParams` from `Network.TLS`.
+* Re-export `ServerParams`, `ClientParams` and `credentialLoadX509` from
+  `Network.TLS`.
 
 * Support TLS 1.3, TLS 1.2 and TLS 1.1 by default.
 

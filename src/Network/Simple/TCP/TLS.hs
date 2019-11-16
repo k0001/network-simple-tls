@@ -60,7 +60,6 @@ module Network.Simple.TCP.TLS (
   , NS.Socket
   , NS.SockAddr
   , T.Context
-  , T.Credentials
   , T.ClientParams
     -- | Please refer to the "Network.TLS" module for more documentation on
     -- 'T.ClientParams`.
@@ -73,6 +72,8 @@ module Network.Simple.TCP.TLS (
     --
     -- There's plenty to be changed, but the documentation for
     -- 'T.ServerParams' is not rendered inside "Network.Simple.TCP.TLS" module.
+  , T.Credential
+  , T.credentialLoadX509
   ) where
 
 
@@ -111,8 +112,8 @@ import           System.X509 (getSystemCertificateStore)
 -- [From "Network.Simple.TCP"]
 --   @'S.HostPreference'('S.Host','S.HostAny','S.HostIPv4','S.HostIPv6')@.
 --
--- [From "Network.TLS"] 'T.Context', 'T.Credentials', 'T.ServerParams',
---   'T.ClientParams'.
+-- [From "Network.TLS"] 'T.Context', 'T.Credential', 'T.ServerParams',
+--   'T.ClientParams', 'T.credentialLoadX509'.
 
 --------------------------------------------------------------------------------
 -- Client side TLS settings
@@ -151,7 +152,7 @@ newDefaultClientParams
 newDefaultClientParams sid = liftIO $ do
   cs <- getSystemCertificateStore
   sm <- TSM.newSessionManager TSM.defaultConfig
-  let cp0 = makeClientParams sid (T.Credentials []) cs
+  let cp0 = makeClientParams sid [] cs
   pure $ cp0
     { T.clientShared = (T.clientShared cp0)
         { T.sharedSessionManager = sm }
@@ -192,7 +193,7 @@ makeClientParams
   -- host. For example, a same host might have different certificates on
   -- differents ports (443 and 995). For TCP connections, it's recommended
   -- to use: @:port@, or @:service@ for the blob (e.g., \@":443"@, @\":https"@).
-  -> T.Credentials
+  -> [T.Credential]
   -- ^ Credentials to provide to the server if requested. Only credentials
   -- matching the server's 'X.DistinguishedName' will be submitted.
   --
@@ -202,7 +203,7 @@ makeClientParams
   --
   -- Use 'getSystemCertificateStore' to obtain the operating system's defaults.
   -> T.ClientParams
-makeClientParams (hn, sp) (T.Credentials creds) cStore =
+makeClientParams (hn, sp) creds cStore =
     (T.defaultParamsClient hn sp)
       { T.clientUseServerNameIndication = True
       , T.clientSupported = def

@@ -1,6 +1,6 @@
 { mkDerivation, base, bytestring, data-default, network
-, network-simple, safe-exceptions, stdenv, tls, transformers, x509
-, x509-store, x509-system, x509-validation
+, network-simple, safe-exceptions, stdenv, tls, tls-session-manager
+, transformers, x509, x509-store, x509-system, x509-validation
 }:
 mkDerivation {
   pname = "network-simple-tls";
@@ -8,7 +8,8 @@ mkDerivation {
   src = ./.;
   libraryHaskellDepends = [
     base bytestring data-default network network-simple safe-exceptions
-    tls transformers x509 x509-store x509-system x509-validation
+    tls tls-session-manager transformers x509 x509-store x509-system
+    x509-validation
   ];
   homepage = "https://github.com/k0001/network-simple-tls";
   description = "Simple interface to TLS secured network sockets";

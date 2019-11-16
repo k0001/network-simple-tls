@@ -28,6 +28,7 @@ library
                    , network-simple >=0.4.3
                    , safe-exceptions
                    , tls >=1.5
+                   , tls-session-manager
                    , transformers
                    , x509
                    , x509-store

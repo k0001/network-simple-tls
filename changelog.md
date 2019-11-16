@@ -1,18 +1,30 @@
 # Version 0.4
 
 * COMPILER ASSISTED BREAKING CHANGE: `ClientSettings` and `ServerSettings` are
-  gone, together with the related functions `updateClientParams`,
-  `clientParams`, `updateServerParams`, `serverParams`. Instead, `ClientParams`
-  and `ServerParams` from the `tls` package are now used throughout.
-  `makeClientSettings` was renamed to `makeClientParams`,
-  `getDefaultClientSettings` was renamed to `getDefaultClientParams`, and
+  gone.  Instead, `ClientParams` and `ServerParams` from the `tls` package are
+  now used throughout.
+
+  The related functions `updateClientParams`, `clientParams`,
+  `updateServerParams`, `serverParams` are gone.
+
+  `makeClientSettings` was renamed to `makeClientParams`.
+
   `makeServerSettings` was renamed to `makeServerParams`.
+
+  `getDefaultClientSettings` was replaced by `newDefaultClientParams`, which adds
+  an in-memory `SessionManager` to the `ClientParams`.
+
+* Added `newDefaultServerParams`, which creates a `ServerParams` with an
+  in-memory `SessionManager`.
 
 * Re-export `ServerParams` and `ClientParams` from `Network.TLS`.
 
 * Support TLS 1.3, TLS 1.2 and TLS 1.1 by default.
 
 * Bump version dependency on `tls` to `>= 1.5`.
+
+* Add dependency on `tls-session-manager`.
+
 
 # Version 0.3.2
 

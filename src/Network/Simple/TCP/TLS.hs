@@ -6,14 +6,15 @@
 -- connections, relevant to both the client side and server side of the
 -- connection.
 --
--- This module re-exports some functions from the "Network.Simple.TCP" module
--- in the @network-simple@ package. Consider using that module directly if you
--- need a similar API without TLS support.
+-- This module re-exports some functions from the "Network.Simple.TCP" module in
+-- the [network-simple](https://hackage.haskell.org/package/network-simple)
+-- package. Consider using that module directly if you need a similar API
+-- without TLS support.
 --
 -- This module uses 'MonadIO' and 'E.MonadMask' extensively so that you can
 -- reuse these functions in monads other than 'IO'. However, if you don't care
--- about any of that, just pretend you are using the 'IO' monad all the time
--- and everything will work as expected.
+-- about any of that, just pretend you are using the 'IO' monad all the time and
+-- everything will work as expected.
 
 module Network.Simple.TCP.TLS (
   -- * Server side
@@ -24,14 +25,15 @@ module Network.Simple.TCP.TLS (
   , accept
   , acceptFork
   -- ** Server TLS Settings
+  , newDefaultServerParams
   , makeServerParams
 
   -- * Client side
   , connect
   , connectOverSOCKS5
   -- ** Client TLS Settings
+  , newDefaultClientParams
   , makeClientParams
-  , getDefaultClientParams
 
   -- * Utils
   , recv
@@ -91,7 +93,8 @@ import qualified GHC.IO.Exception as Eg
 import qualified Network.Simple.TCP as S
 import qualified Network.Socket as NS
 import qualified Network.TLS as T
-import           Network.TLS.Extra as TE
+import qualified Network.TLS.SessionManager as TSM
+import qualified Network.TLS.Extra as TE
 import           System.X509 (getSystemCertificateStore)
 
 --------------------------------------------------------------------------------
@@ -114,14 +117,37 @@ import           System.X509 (getSystemCertificateStore)
 --------------------------------------------------------------------------------
 -- Client side TLS settings
 
--- | Get the system default 'T.ClientParams' for a particular 'X.ServiceID'.
+-- | Obtain new default 'T.ClientParams' for a particular 'X.ServiceID'.
 --
--- Defaults: No client credentials, system certificate store.
+-- Defaults:
 --
--- See 'makeClientParams' to better understand the default settings used.
-getDefaultClientParams :: MonadIO m => X.ServiceID -> m T.ClientParams
-getDefaultClientParams sid = liftIO $ do
-  makeClientParams sid (T.Credentials []) <$> getSystemCertificateStore
+-- * No client credentials sumbitted to the server.
+--
+-- * Use system-wide CA certificate store.
+--
+-- * Use an in-memory TLS session manager from the
+-- [tls-session-manager](https://hackage.haskell.org/package/tls-session-manager)
+-- package.
+--
+-- * Everything else as proposed by 'makeClientParams'.
+newDefaultClientParams
+  :: MonadIO m
+  => X.ServiceID
+  -- ^
+  -- @
+  -- 'X.ServiceID' ~ ('S.HostName', 'B.ByteString')
+  -- @
+  --
+  -- See the docs for 'makeClientParams'.
+  -> m T.ClientParams
+newDefaultClientParams sid = liftIO $ do
+  cs <- getSystemCertificateStore
+  sm <- TSM.newSessionManager TSM.defaultConfig
+  let cp0 = makeClientParams sid (T.Credentials []) cs
+  pure $ cp0
+    { T.clientShared = (T.clientShared cp0)
+        { T.sharedSessionManager = sm }
+    }
 
 -- | Make defaults 'T.ClientParams'.
 --
@@ -142,7 +168,8 @@ getDefaultClientParams sid = liftIO $ do
 -- 'T.ClientParams`.
 makeClientParams
   :: X.ServiceID
-  -- ^ @
+  -- ^
+  -- @
   -- 'X.ServiceID' ~ ('S.HostName', 'B.ByteString')
   -- @
   --
@@ -250,6 +277,29 @@ makeServerParams cred ycStore = def
     -- Ciphers prefered by the server take precedence.
     chooseCipher :: T.Version -> [T.Cipher] -> T.Cipher
     chooseCipher _ cCiphs = head (intersect TE.ciphersuite_strong cCiphs)
+
+-- | Obtain new default 'T.ServerParams' for a particular server 'T.Credential'.
+--
+-- Defaults:
+--
+-- * Don't require credentials from clients.
+--
+-- * Use an in-memory TLS session manager from the
+-- [tls-session-manager](https://hackage.haskell.org/package/tls-session-manager)
+-- package.
+--
+-- * Everything else as proposed by 'makeServerParams'.
+newDefaultServerParams
+  :: MonadIO m
+  => T.Credential -- ^ Server credential.
+  -> m T.ServerParams
+newDefaultServerParams cred = liftIO $ do
+  sm <- TSM.newSessionManager TSM.defaultConfig
+  let sp0 = makeServerParams cred Nothing
+  pure $ sp0
+    { T.serverShared = (T.serverShared sp0)
+        { T.sharedSessionManager = sm }
+    }
 
 --------------------------------------------------------------------------------
 

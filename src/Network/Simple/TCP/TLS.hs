@@ -602,3 +602,5 @@ silentBye ctx = do
                   , Eg.ioe_errno = Just ioe
                   } | Errno ioe == ePIPE
           -> return ()
+        _ -> E.throwIO e
+

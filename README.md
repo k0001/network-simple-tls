@@ -1,6 +1,6 @@
 # network-simple-tls
 
-[![Build Status](https://secure.travis-ci.org/k0001/network-simple-tls.png)](http://travis-ci.org/k0001/network-simple-tls)
+**REPOSITORY MOVED TO** [https://github.com/k0001/network-simple](https://github.com/k0001/network-simple)
 
 Haskell library simplifying the useage of TLS secured network
 connections. Currently, only TCP sockets are supported. This package
